@@ -24,6 +24,12 @@
  * ter. O custo é um esqueleto a cada troca; o preço da alternativa é sugerir
  * a copy errada para a pessoa errada.
  *
+ * ─── Quem pode ler ──────────────────────────────────────────────────────────
+ *
+ * Piso `viewer`, nos dois lados (rota e `usePermission("copiloto.view")`): é
+ * leitura do que a pessoa já vê no CRM. A sessão de acompanhamento SOMENTE
+ * LEITURA é `viewer` e passa; quem não pode ver o inbox não chega aqui.
+ *
  * ─── O único identificador é o da conversa ──────────────────────────────────
  *
  * Nada de `organization_id`, `contact_id`, `lead_id` ou `pipeline_id` no
@@ -33,6 +39,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
+import { usePermission } from "@/hooks/auth/AuthProvider";
 import type { ContextoDoCopiloto, RespostaDoContexto } from "@/lib/afb/copiloto/contrato";
 import { apiClient } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
@@ -48,9 +55,12 @@ export function rotaDoContextoDoCopiloto(conversationId: string): string {
 
 export function useCopilotoContexto(conversationId: string | null | undefined) {
   const id = conversationId && conversationId.trim() !== "" ? conversationId : null;
+  // Não pede o que o papel não pode ler — o mesmo padrão de
+  // `useConversationNotes`. A rota tem o mesmo piso; aqui só se evita o 403.
+  const podeConsultar = usePermission("copiloto.view");
   return useQuery<ContextoDoCopiloto, ApiError | Error>({
     queryKey: chaveDoContextoDoCopiloto(id),
-    enabled: id !== null,
+    enabled: id !== null && podeConsultar,
     retry: false,
     queryFn: () => apiClient.get<RespostaDoContexto>(rotaDoContextoDoCopiloto(id!)).then((r) => r.data),
   });

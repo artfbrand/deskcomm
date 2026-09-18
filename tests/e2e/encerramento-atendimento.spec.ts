@@ -3,15 +3,10 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-import { test, expect, type Page } from "@playwright/test";
-import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
+import { test, expect } from "@playwright/test";
 
-/** A terceira coluna tem abas; a ficha do contato é a aba «Contato». */
-async function abrirAbaContato(page: Page): Promise<void> {
-  const aba = page.getByTestId("aba-contato").first();
-  await aba.waitFor({ state: "visible" });
-  if ((await aba.getAttribute("aria-selected")) !== "true") await aba.click();
-}
+import { abrirAbaContato } from "./helpers/painel-lateral";
+import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
 
 const credentials = credenciaisSupabaseDeTeste();
 const db = createClient(credentials.url, credentials.serviceRole, {

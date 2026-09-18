@@ -9,6 +9,8 @@ import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { test, expect, type Page, type TestInfo } from "@playwright/test";
+
+import { abrirAbaContato } from "./helpers/painel-lateral";
 import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
 import { escolherDiaDesenhado, irParaASemanaSeguinte } from "./helpers/agenda-semana-integra";
 import { enviarTextoFixoPendente } from "../../lib/followup/enviar-texto-fixo";
@@ -283,6 +285,8 @@ test("Inbox marca cliente/conversa; detalhe antigo confirma presença com evidê
   await inbound(f, p, "Preciso marcar uma consulta");
   await login(page, f.email);
   await page.goto(`/app/inbox/${p.conversation}`);
+  // «Marcar compromisso» é da ficha do contato — a aba «Contato» da terceira coluna.
+  await abrirAbaContato(page);
   await page.getByRole("link", { name: "Marcar compromisso", exact: true }).click();
   const panel = page.getByTestId("painel-de-marcacao");
   await expect(panel).toBeVisible();

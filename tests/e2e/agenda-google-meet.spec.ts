@@ -4,6 +4,8 @@ import { createServer, type Server } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { test, expect, type Page, type TestInfo } from "@playwright/test";
+
+import { abrirAbaContato } from "./helpers/painel-lateral";
 import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
 import { reconcileAppointment } from "../../lib/agenda/google/sync-executor";
 import { createMeetDeliveryHandler } from "../../lib/agent-engine/agent/meet-delivery";
@@ -173,6 +175,8 @@ async function book(page: Page, f: Fixture) {
   await inbound(f, "Quero marcar minha reunião");
   await login(page, f);
   await page.goto(`/app/inbox/${f.conversation}`);
+  // «Marcar compromisso» é da ficha do contato — a aba «Contato» da terceira coluna.
+  await abrirAbaContato(page);
   await page.getByRole("link", { name: "Marcar compromisso", exact: true }).click();
   await expect(page.getByTestId("painel-de-marcacao")).toBeVisible();
   await expect(page.getByLabel("Quem será atendido")).toHaveValue(f.contact);

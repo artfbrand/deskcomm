@@ -8,9 +8,17 @@
  * instalação pagar por um módulo que a maioria não liga.
  *
  * Segurança, na ordem em que acontece:
- *   1. `requireRole("agent")` — sessão validada no backend (`getUser()`),
+ *   1. `requireRole("viewer")` — sessão validada no backend (`getUser()`),
  *      organização ATIVA resolvida da sessão. Nada vem do pedido além do id
- *      da conversa, que está no path.
+ *      da conversa, que está no path. O piso é VIEWER porque isto é leitura
+ *      do que a pessoa já enxerga no CRM (`inbox.view`, `pipeline.view`,
+ *      `contact.view` são `viewer`): a coluna do lead, o campo do lead, o
+ *      papel da coluna. Um piso de `agent` negava a sessão de acompanhamento
+ *      SOMENTE LEITURA — que é `viewer` por construção
+ *      (`fn_user_role_in_org`) e vê a conversa inteira — com um 403 que não
+ *      protegia nada: o mesmo dado sai do `crm-summary` sem piso nenhum.
+ *      Quem não pode ver o inbox continua sem ver o copiloto: a RLS e o
+ *      filtro de organização abaixo não mudam com o papel.
  *   2. Cliente de SESSÃO (RLS). Nunca admin.
  *   3. Toda consulta do carregador filtra `organization_id` da sessão — a RLS
  *      enxerga todas as orgs do usuário, e o filtro é o que prende à ativa.
@@ -41,7 +49,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const requestId = randomUUID();
   const { conversationId } = await ctx.params;
 
-  const authz = await requireRole("agent", { requestId, resource: "conversations" });
+  const authz = await requireRole("viewer", { requestId, resource: "conversations" });
   if (!authz.ok) return authz.response;
   const t = (texto: string) => traduzir(texto, authz.user.idioma);
 

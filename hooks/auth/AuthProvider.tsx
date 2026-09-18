@@ -127,6 +127,9 @@ const ACTION_MIN_ROLE: Record<string, Role> = {
   "ai.automatico.view": "agent",
   "ai.inbox.view": "agent",
   "inbox.notes.view": "agent",
+  // Leitura do contexto do copiloto comercial: o mesmo piso do que ele mostra
+  // (inbox, funil, contato). A rota exige o mesmo `viewer`.
+  "copiloto.view": "viewer",
   "message-templates.view": "agent",
   "ai.agents.view": "manager",
   "ai.agents.write": "admin",

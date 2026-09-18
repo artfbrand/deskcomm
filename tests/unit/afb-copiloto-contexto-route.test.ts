@@ -61,9 +61,9 @@ describe("GET /api/v1/afb/copiloto/[conversationId]", () => {
     expect(createClient).not.toHaveBeenCalled();
   });
 
-  it("exige papel agent e responde com X-Request-Id", async () => {
+  it("exige papel viewer (leitura — o mesmo piso do inbox e do CRM) e responde com X-Request-Id", async () => {
     const res = await chamar();
-    expect(vi.mocked(requireRole).mock.calls[0]![0]).toBe("agent");
+    expect(vi.mocked(requireRole).mock.calls[0]![0]).toBe("viewer");
     expect(res.headers.get("X-Request-Id")).toBeTruthy();
   });
 

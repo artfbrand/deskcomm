@@ -28,6 +28,10 @@ import {
 } from "./useCopilotoContexto";
 
 vi.mock("@/lib/api/client", () => ({ apiClient: { get: vi.fn() } }));
+// Permissão por papel — o mesmo gate que `useConversationNotes` usa. Padrão:
+// pode ler; o caso "sem permissão" troca por conversa.
+const permissao = { pode: true };
+vi.mock("@/hooks/auth/AuthProvider", () => ({ usePermission: () => permissao.pode }));
 
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001";
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-000000000002";
@@ -64,6 +68,7 @@ function responde(porConversa: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  permissao.pode = true;
 });
 
 describe("useCopilotoContexto", () => {
@@ -87,6 +92,15 @@ describe("useCopilotoContexto", () => {
     expect(rota).toBe(`/api/v1/afb/copiloto/${A}`);
     expect(rota).not.toMatch(/organization_id|contact_id|lead_id|pipeline_id|\?/);
     expect(opts).toBeUndefined();
+  });
+
+  it("sem permissão copiloto.view (papel abaixo de viewer) não pede — o mesmo padrão das notas", async () => {
+    permissao.pode = false;
+    responde({ [A]: ACTIVE_A });
+    const { result } = renderHook(() => useCopilotoContexto(A), { wrapper: wrapperFor(qc()) });
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(result.current.data).toBeUndefined();
+    expect(apiClient.get).not.toHaveBeenCalled();
   });
 
   it("rota e chave: id é escapado na rota e vai cru na chave", () => {
