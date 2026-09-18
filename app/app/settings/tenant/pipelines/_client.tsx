@@ -115,9 +115,11 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
   // Só um id que o registry conhece conta como "inicial": id órfão (playbook
   // removido, jsonb mexido à mão) começa em «Selecione um playbook».
   const playbookInicial: PlaybookId | null = ehPlaybookId(idGravado) ? idGravado : null;
-  const [playbookId, setPlaybookId] = useState<PlaybookId | typeof SEM_PLAYBOOK>(
-    playbookInicial ?? SEM_PLAYBOOK,
-  );
+  // Tipado pela variável, e não por genérico no `useState`: o guarda de
+  // vocabulário lê `>…<` como texto de tela, e um `<` aqui fecharia um trecho
+  // que começa no genérico de `fields` e carrega o identificador `pipeline`.
+  const selecaoInicial: PlaybookId | typeof SEM_PLAYBOOK = playbookInicial ?? SEM_PLAYBOOK;
+  const [playbookId, setPlaybookId] = useState(selecaoInicial);
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
