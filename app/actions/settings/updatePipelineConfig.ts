@@ -12,7 +12,7 @@ import {
 } from "@/lib/schemas/settings";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
-import { mergeModulos } from "@/lib/pipelines/modulos";
+import { mergeConfiguracaoDeModulos } from "@/lib/pipelines/modulos";
 
 export type UpdatePipelineConfigResult =
   | { ok: true }
@@ -68,9 +68,10 @@ export async function updatePipelineConfig(
   // `modulos` NÃO segue o padrão das duas linhas acima. Atribuir
   // `parsed.data.modulos` inteiro apagaria os módulos que o patch não citou —
   // e o defeito ficaria invisível enquanto só houver um módulo. Ver
-  // `mergeModulos`: segundo nível por spread, módulo inteiro substituído.
+  // `mergeConfiguracaoDeModulos`: spread por módulo E por propriedade do
+  // módulo, para o interruptor (`enabled`) e o mapa (`etapas`) não se apagarem.
   if (parsed.data.modulos !== undefined) {
-    nextSettings.modulos = mergeModulos(currentSettings.modulos, parsed.data.modulos);
+    nextSettings.modulos = mergeConfiguracaoDeModulos(currentSettings.modulos, parsed.data.modulos);
   }
 
   const { error } = await supabase

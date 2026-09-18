@@ -120,8 +120,9 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
       vocabulary: { lead, deal, won, lost },
       fields: ok,
       lost_reasons: reasons,
-      // Só este módulo vai no patch; os demais (quando existirem) a action
-      // preserva — é `mergeModulos` quem garante, não este objeto.
+      // Só o interruptor deste módulo vai no patch; os demais módulos e as
+      // outras propriedades dele (o mapa de etapas) a action preserva — é
+      // `mergeConfiguracaoDeModulos` quem garante, não este objeto.
       modulos: { copiloto_comercial: { enabled: copilotoComercial } },
     };
     startTransition(async () => {

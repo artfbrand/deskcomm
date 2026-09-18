@@ -1,5 +1,5 @@
 /**
- * Módulos ligados por funil — `crm_pipelines.settings.modulos.<modulo>.enabled`.
+ * Módulos ligados por funil — `crm_pipelines.settings.modulos.<modulo>`.
  *
  * Duas funções puras, e é de propósito que nenhuma delas conheça um módulo
  * pelo nome: o core sabe LER e MESCLAR módulos; quem sabe QUAL módulo existe é
@@ -14,14 +14,22 @@
  * pelo Zod; SQL na mão não passa. Então a leitura não confia na forma:
  * `"true"`, `1`, `modulos` como array, módulo como array — tudo é "desligado".
  *
- * ─── Por que o merge tem exatamente dois níveis ─────────────────────────────
+ * ─── O merge tem exatamente TRÊS níveis, e para no terceiro ─────────────────
  *
- * Um spread raso no topo (`nextSettings.modulos = patch.modulos`) apagaria os
- * outros módulos ao salvar um. Hoje só há um e o defeito ficaria invisível até
- * o segundo nascer — que é o tipo de bug que só aparece depois. Um deep-merge
- * genérico erra na outra direção: as chaves futuras de um módulo podem ser
- * arrays, e array se SUBSTITUI, não se concatena. Logo: topo por spread (a
- * action já faz), `modulos` por spread (aqui), módulo inteiro substituído.
+ *   settings          → spread (a action faz)       preserva fields, canonical_tags…
+ *   modulos           → spread (aqui)               preserva os outros módulos
+ *   módulo            → spread (aqui)               preserva as propriedades não enviadas
+ *   propriedade       → SUBSTITUIÇÃO INTEIRA         `etapas` enviado troca o mapa todo
+ *
+ * O terceiro nível existe porque um módulo tem MAIS de uma propriedade com
+ * donos diferentes: o interruptor da tela manda `{ enabled }` e não sabe do
+ * mapa de etapas; a tela do mapa manda `{ etapas }` e não sabe do interruptor.
+ * Substituir o módulo inteiro faria cada uma apagar a outra.
+ *
+ * O quarto nível NÃO existe, de propósito: `etapas` enviado substitui o mapa
+ * inteiro. Merge por stageId tornaria impossível DESMAPEAR uma coluna — quem
+ * quer tirar uma entrada manda o mapa sem ela. E um deep-merge genérico erra
+ * também em array: array se substitui, não se concatena.
  */
 import type { ModulosDeFunil } from "@/lib/schemas/settings";
 
@@ -50,18 +58,23 @@ export function moduloDeFunilAtivo(
 }
 
 /**
- * Mescla o patch de módulos sobre o que já está gravado — segundo nível só.
+ * Mescla o patch de módulos sobre o que já está gravado — três níveis, ver o
+ * cabeçalho.
  *
- * Módulo presente no patch SUBSTITUI o módulo inteiro (não funde chaves dentro
- * dele); módulo ausente no patch PERMANECE como estava. `atual` inválido (null,
- * array, string vinda de um jsonb mexido à mão) é tratado como vazio, nunca
- * lança — a action está no meio de uma gravação e um throw aqui deixaria o
- * administrador com "Erro:" e nenhuma pista.
+ * `atual` inválido (null, array, string vinda de um jsonb mexido à mão) é
+ * tratado como vazio, nunca lança — a action está no meio de uma gravação e
+ * um throw aqui deixaria o administrador com "Erro:" e nenhuma pista. Módulo
+ * atual inválido idem: o patch dele vira o módulo inteiro.
  */
-export function mergeModulos(
+export function mergeConfiguracaoDeModulos(
   atual: unknown,
   patch: ModulosDeFunil,
 ): Record<string, unknown> {
-  const base = objetoSimples(atual) ? atual : {};
-  return { ...base, ...patch };
+  const base: Record<string, unknown> = objetoSimples(atual) ? { ...atual } : {};
+  for (const [nome, moduloPatch] of Object.entries(patch)) {
+    if (moduloPatch === undefined) continue;
+    const moduloAtual = objetoSimples(base[nome]) ? base[nome] : {};
+    base[nome] = { ...moduloAtual, ...moduloPatch };
+  }
+  return base;
 }

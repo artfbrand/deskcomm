@@ -28,6 +28,8 @@ vi.mock("@/lib/audit", async (orig) => ({
 
 const ORG = "22222222-2222-4222-8222-222222222222";
 const PIPELINE = "33333333-3333-4333-8333-333333333333";
+const STAGE_A = "44444444-4444-4444-8444-000000000001";
+const STAGE_B = "44444444-4444-4444-8444-000000000002";
 
 /** O que um funil real da tela de configuração tem gravado hoje. */
 const SETTINGS_ATUAIS = {
@@ -35,7 +37,10 @@ const SETTINGS_ATUAIS = {
   lost_reasons: ["Preço"],
   canonical_tags: ["vip"],
   identity_resolution: { fields_in_priority_order: ["cpf", "phone_e164", "email"] },
-  modulos: { outro_modulo: { enabled: true } },
+  modulos: {
+    outro_modulo: { enabled: true },
+    copiloto_comercial: { enabled: true, etapas: { [STAGE_A]: "conversa" } },
+  },
 };
 
 /** Supabase mockado: lê `settings` fixo e captura o que o UPDATE gravou. */
@@ -86,7 +91,10 @@ describe("updatePipelineConfig — preservação de settings", () => {
     expect(r).toEqual({ ok: true });
     expect(gravado.settings).toEqual({
       ...SETTINGS_ATUAIS,
-      modulos: { outro_modulo: { enabled: true }, copiloto_comercial: { enabled: true } },
+      modulos: {
+        outro_modulo: { enabled: true },
+        copiloto_comercial: { enabled: true, etapas: { [STAGE_A]: "conversa" } },
+      },
     });
   });
 
@@ -106,11 +114,8 @@ describe("updatePipelineConfig — preservação de settings", () => {
     });
   });
 
-  it("desligar o módulo substitui só ele, sem tocar no resto", async () => {
-    const gravado = comFunil({
-      ...structuredClone(SETTINGS_ATUAIS),
-      modulos: { outro_modulo: { enabled: true }, copiloto_comercial: { enabled: true } },
-    });
+  it("desligar o interruptor NÃO apaga o mapa de etapas nem o outro módulo", async () => {
+    const gravado = comFunil(structuredClone(SETTINGS_ATUAIS));
     const { updatePipelineConfig } = await import("./updatePipelineConfig");
 
     await updatePipelineConfig(PIPELINE, {
@@ -119,8 +124,39 @@ describe("updatePipelineConfig — preservação de settings", () => {
 
     expect((gravado.settings as { modulos: unknown }).modulos).toEqual({
       outro_modulo: { enabled: true },
-      copiloto_comercial: { enabled: false },
+      copiloto_comercial: { enabled: false, etapas: { [STAGE_A]: "conversa" } },
     });
+  });
+
+  it("salvar o mapa de etapas NÃO apaga enabled, e substitui o mapa inteiro", async () => {
+    const gravado = comFunil(structuredClone(SETTINGS_ATUAIS));
+    const { updatePipelineConfig } = await import("./updatePipelineConfig");
+
+    await updatePipelineConfig(PIPELINE, {
+      modulos: { copiloto_comercial: { etapas: { [STAGE_B]: "apresentacao" } } },
+    });
+
+    expect((gravado.settings as { modulos: unknown }).modulos).toEqual({
+      outro_modulo: { enabled: true },
+      copiloto_comercial: { enabled: true, etapas: { [STAGE_B]: "apresentacao" } },
+    });
+    // E as chaves de topo seguem intactas.
+    const { modulos: _m, ...topo } = gravado.settings as Record<string, unknown>;
+    const { modulos: _a, ...topoAtual } = SETTINGS_ATUAIS;
+    expect(topo).toEqual(topoAtual);
+  });
+
+  it("rejeita papel inválido e stage id vazio antes de tocar no banco", async () => {
+    const { updatePipelineConfig } = await import("./updatePipelineConfig");
+    for (const etapas of [{ [STAGE_A]: "papel_inventado" }, { "": "conversa" }]) {
+      const gravado = comFunil(structuredClone(SETTINGS_ATUAIS));
+      const r = await updatePipelineConfig(PIPELINE, {
+        modulos: { copiloto_comercial: { etapas: etapas as never } },
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toBe("validation_failed");
+      expect(gravado.settings).toBeUndefined();
+    }
   });
 
   it("funil sem `modulos` gravado (default do banco) ganha a chave sem perder as demais", async () => {

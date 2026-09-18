@@ -160,27 +160,59 @@ export type CustomFieldDef = z.infer<typeof customFieldSchema>;
 /**
  * Módulos ligados por FUNIL, não por organização — `crm_pipelines.settings.modulos`.
  *
- * Um módulo é um objeto com `enabled` e, no futuro, as chaves dele. A chave do
- * módulo é genérica de propósito: o core sabe que existe um "copiloto comercial"
- * ligável por funil; QUEM preenche esse copiloto (playbook, textos, regras) mora
- * fora daqui. Assim um fork atualiza o core sem carregar nome de cliente.
+ * Um módulo é um objeto com `enabled` e as chaves dele. A chave do módulo é
+ * genérica de propósito: o core sabe que existe um "copiloto comercial" ligável
+ * por funil e que ele atribui um PAPEL a cada coluna; QUEM preenche esse
+ * copiloto (playbook, textos, regras) mora fora daqui. Assim um fork atualiza o
+ * core sem carregar nome de cliente.
  *
- * `.strict()` nos dois níveis novos e não no topo: `enabled: "true"` (string)
- * ou `enable: true` (erro de digitação) têm de falhar em validação, não entrar
- * no jsonb e virar "desligado sem explicação" na leitura — que é `=== true`
- * (ver `lib/pipelines/modulos.ts`). O topo segue frouxo para não quebrar
- * cliente antigo que mande chave a mais.
+ * `.strict()` nos níveis novos e não no topo: `enabled: "true"` (string) ou
+ * `enable: true` (erro de digitação) têm de falhar em validação, não entrar no
+ * jsonb e virar "desligado sem explicação" na leitura — que é `=== true` (ver
+ * `lib/pipelines/modulos.ts`). O topo segue frouxo para não quebrar cliente
+ * antigo que mande chave a mais.
  *
- * Cada módulo é `.optional()` porque o patch é PARCIAL: mandar
- * `{ modulos: { copiloto_comercial: {...} } }` não significa "apague os outros
- * módulos" — quem garante isso é `mergeModulos`, não o schema.
+ * TUDO É PARCIAL, em três níveis: módulo ausente = não altera; propriedade
+ * ausente dentro do módulo = não altera. `{ copiloto_comercial: { enabled: false } }`
+ * NÃO apaga `etapas`. Quem garante isso é `mergeConfiguracaoDeModulos`, não o
+ * schema — o schema só diz o que pode entrar.
  */
-export const moduloDeFunilSchema = z.object({ enabled: z.boolean() }).strict();
-export type ModuloDeFunil = z.infer<typeof moduloDeFunilSchema>;
+
+/**
+ * O papel que uma coluna do funil desempenha para o copiloto comercial —
+ * vocabulário FECHADO, e do core: é o que o schema aceita e o que a leitura
+ * (`lib/afb/playbook/papeis.ts`) deriva. Um papel novo nasce aqui.
+ */
+export const PAPEIS_DE_ETAPA_DO_FUNIL = [
+  "prospeccao",
+  "conversa",
+  "pre_venda",
+  "reuniao_agendada",
+  "apresentacao",
+  "fechamento",
+  "pos_venda",
+  "ganho",
+  "perdido",
+] as const;
+export type PapelDaEtapaDoFunil = (typeof PAPEIS_DE_ETAPA_DO_FUNIL)[number];
+
+/**
+ * `etapas` é `{ [id da etapa do funil]: papel }`. Chave é o UUID de
+ * `crm_stages.id` — nunca nome, slug ou posição: os três mudam ou nascem do
+ * nome; o id nasce do banco. Quando enviado, o mapa SUBSTITUI o anterior
+ * inteiro (não há merge por stageId): é a única forma de DESMAPEAR uma coluna.
+ */
+export const copilotoComercialSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    etapas: z.record(z.uuid(), z.enum(PAPEIS_DE_ETAPA_DO_FUNIL)).optional(),
+  })
+  .strict();
+export type CopilotoComercialPatch = z.infer<typeof copilotoComercialSchema>;
 
 export const modulosDeFunilSchema = z
   .object({
-    copiloto_comercial: moduloDeFunilSchema.optional(),
+    copiloto_comercial: copilotoComercialSchema.optional(),
   })
   .strict();
 export type ModulosDeFunil = z.infer<typeof modulosDeFunilSchema>;

@@ -1,20 +1,33 @@
 /**
  * Leitor e merge de módulos por funil.
  *
- * Os dois defeitos que este arquivo existe para tornar impossíveis:
+ * Os defeitos que este arquivo existe para tornar impossíveis:
  *
  *   1. LEITURA CRÉDULA — `settings` chega de cinco leitores sem validação; se
  *      o leitor aceitasse `"true"` ou `1`, um jsonb mexido à mão ligaria um
  *      módulo que ninguém ligou.
- *   2. MERGE RASO — atribuir `patch.modulos` inteiro apaga os módulos que o
- *      patch não citou. Com um módulo só o bug não aparece; o caso "módulo
- *      existente não é apagado ao atualizar outro" é o que o pega ANTES do
- *      segundo módulo existir. Sabotagem provada: trocar o spread de segundo
- *      nível por atribuição direta deixa esse caso vermelho.
+ *   2. MERGE RASO NO SEGUNDO NÍVEL — atribuir `patch.modulos` inteiro apaga os
+ *      módulos que o patch não citou. Com um módulo só o bug não aparece; o
+ *      caso "módulo existente não é apagado ao atualizar outro" o pega ANTES
+ *      do segundo módulo existir.
+ *   3. MERGE RASO NO TERCEIRO NÍVEL — substituir o módulo inteiro faz o
+ *      interruptor (`{ enabled }`) apagar o mapa (`etapas`) e vice-versa: duas
+ *      telas com donos diferentes escrevendo no mesmo objeto. Foi o risco
+ *      identificado antes de o mapa existir, e é o caso "enabled não apaga
+ *      etapas".
+ *   4. MERGE PROFUNDO DEMAIS — fundir `etapas` por stageId tornaria impossível
+ *      desmapear uma coluna. O caso "etapas é substituído inteiro" segura o
+ *      quarto nível fechado.
+ *
+ * Sabotagem provada nos dois sentidos: trocar o spread do módulo por
+ * atribuição deixa o caso 3 vermelho; fundir `etapas` deixa o caso 4 vermelho.
  */
 import { describe, expect, it } from "vitest";
 
-import { mergeModulos, moduloDeFunilAtivo } from "./modulos";
+import { mergeConfiguracaoDeModulos, moduloDeFunilAtivo } from "./modulos";
+
+const A = "11111111-1111-4111-8111-000000000001";
+const B = "11111111-1111-4111-8111-000000000002";
 
 describe("moduloDeFunilAtivo", () => {
   it("é true somente quando enabled === true", () => {
@@ -47,17 +60,19 @@ describe("moduloDeFunilAtivo", () => {
     expect(moduloDeFunilAtivo({ modulos: { x: null } }, "x")).toBe(false);
   });
 
+  it("um módulo com etapas mas sem enabled está desligado", () => {
+    expect(moduloDeFunilAtivo({ modulos: { x: { etapas: { [A]: "conversa" } } } }, "x")).toBe(false);
+  });
+
   it("ignora chaves herdadas do protótipo", () => {
-    // `{}` tem `toString` via prototype; um módulo chamado assim não pode
-    // "existir" só porque Object.prototype o tem.
     expect(moduloDeFunilAtivo({ modulos: {} }, "toString")).toBe(false);
   });
 });
 
-describe("mergeModulos", () => {
+describe("mergeConfiguracaoDeModulos — nível 2 (entre módulos)", () => {
   it("não apaga módulo existente ao atualizar outro", () => {
     const atual = { a: { enabled: true }, b: { enabled: false } };
-    const r = mergeModulos(atual, { copiloto_comercial: { enabled: true } });
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { enabled: true } });
     expect(r).toEqual({
       a: { enabled: true },
       b: { enabled: false },
@@ -65,25 +80,19 @@ describe("mergeModulos", () => {
     });
   });
 
-  it("módulo presente no patch é substituído INTEIRO, não fundido", () => {
-    const atual = { copiloto_comercial: { enabled: true, chave_antiga: "x" } };
-    const r = mergeModulos(atual, { copiloto_comercial: { enabled: false } });
-    expect(r.copiloto_comercial).toEqual({ enabled: false });
-  });
-
   it("aceita atual null/undefined e devolve só o patch", () => {
-    expect(mergeModulos(null, { copiloto_comercial: { enabled: true } })).toEqual({
+    expect(mergeConfiguracaoDeModulos(null, { copiloto_comercial: { enabled: true } })).toEqual({
       copiloto_comercial: { enabled: true },
     });
-    expect(mergeModulos(undefined, { copiloto_comercial: { enabled: true } })).toEqual({
+    expect(mergeConfiguracaoDeModulos(undefined, { copiloto_comercial: { enabled: true } })).toEqual({
       copiloto_comercial: { enabled: true },
     });
   });
 
   it("atual inválido (array, string, número) não explode e vira vazio", () => {
     for (const atual of [[], "lixo", 42, true]) {
-      expect(() => mergeModulos(atual, { copiloto_comercial: { enabled: true } })).not.toThrow();
-      expect(mergeModulos(atual, { copiloto_comercial: { enabled: true } })).toEqual({
+      expect(() => mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { enabled: true } })).not.toThrow();
+      expect(mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { enabled: true } })).toEqual({
         copiloto_comercial: { enabled: true },
       });
     }
@@ -91,12 +100,73 @@ describe("mergeModulos", () => {
 
   it("patch vazio devolve o atual intacto", () => {
     const atual = { a: { enabled: true } };
-    expect(mergeModulos(atual, {})).toEqual(atual);
+    expect(mergeConfiguracaoDeModulos(atual, {})).toEqual(atual);
   });
 
-  it("não muta o objeto de entrada", () => {
+  it("módulo explicitamente undefined no patch não altera nem cria", () => {
     const atual = { a: { enabled: true } };
-    mergeModulos(atual, { copiloto_comercial: { enabled: true } });
-    expect(atual).toEqual({ a: { enabled: true } });
+    expect(mergeConfiguracaoDeModulos(atual, { copiloto_comercial: undefined })).toEqual(atual);
+  });
+
+  it("não muta os objetos de entrada", () => {
+    const atual = { copiloto_comercial: { enabled: true, etapas: { [A]: "conversa" } } };
+    const congelado = structuredClone(atual);
+    mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { enabled: false } });
+    expect(atual).toEqual(congelado);
+  });
+});
+
+describe("mergeConfiguracaoDeModulos — nível 3 (dentro do módulo)", () => {
+  it("salvar enabled NÃO apaga etapas — o risco que motivou este nível", () => {
+    const atual = { copiloto_comercial: { enabled: true, etapas: { [A]: "conversa" } } };
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { enabled: false } });
+    expect(r).toEqual({ copiloto_comercial: { enabled: false, etapas: { [A]: "conversa" } } });
+  });
+
+  it("salvar etapas NÃO apaga enabled", () => {
+    const atual = { copiloto_comercial: { enabled: true, etapas: { [A]: "conversa" } } };
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { etapas: { [B]: "apresentacao" } } });
+    expect(r).toEqual({ copiloto_comercial: { enabled: true, etapas: { [B]: "apresentacao" } } });
+  });
+
+  it("salvar o copiloto não apaga os outros módulos nem as propriedades deles", () => {
+    const atual = {
+      outro: { enabled: true, qualquer_coisa: [1, 2] },
+      copiloto_comercial: { enabled: true },
+    };
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { etapas: { [A]: "prospeccao" } } });
+    expect(r).toEqual({
+      outro: { enabled: true, qualquer_coisa: [1, 2] },
+      copiloto_comercial: { enabled: true, etapas: { [A]: "prospeccao" } },
+    });
+  });
+
+  it("propriedade desconhecida já gravada no módulo sobrevive ao patch", () => {
+    // Escrita por SQL ou por versão futura: o merge não sabe dela e não a apaga.
+    const atual = { copiloto_comercial: { enabled: true, futuro: "x" } };
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { enabled: false } });
+    expect(r).toEqual({ copiloto_comercial: { enabled: false, futuro: "x" } });
+  });
+
+  it("módulo atual inválido (array/string) vira o patch inteiro, sem lançar", () => {
+    for (const modulo of [[], "lixo", 7, null]) {
+      const r = mergeConfiguracaoDeModulos({ copiloto_comercial: modulo }, { copiloto_comercial: { enabled: true } });
+      expect(r).toEqual({ copiloto_comercial: { enabled: true } });
+    }
+  });
+});
+
+describe("mergeConfiguracaoDeModulos — NÃO há nível 4", () => {
+  it("etapas enviado substitui o mapa INTEIRO, não funde por stageId", () => {
+    const atual = { copiloto_comercial: { enabled: true, etapas: { [A]: "conversa" } } };
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { etapas: { [B]: "apresentacao" } } });
+    expect((r.copiloto_comercial as { etapas: unknown }).etapas).toEqual({ [B]: "apresentacao" });
+    expect((r.copiloto_comercial as { etapas: Record<string, unknown> }).etapas[A]).toBeUndefined();
+  });
+
+  it("etapas vazio desmapeia tudo — é a única forma de tirar uma coluna do mapa", () => {
+    const atual = { copiloto_comercial: { enabled: true, etapas: { [A]: "conversa", [B]: "prospeccao" } } };
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { etapas: {} } });
+    expect(r).toEqual({ copiloto_comercial: { enabled: true, etapas: {} } });
   });
 });
