@@ -5,7 +5,9 @@ import {
   tenantSchema,
   notificationPrefsSchema,
   pipelineConfigPatchSchema,
+  PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL,
   PAPEIS_DE_ETAPA_DO_FUNIL,
+  PAPEIS_TERMINAIS_DA_ETAPA_DO_FUNIL,
 } from "./settings";
 
 describe("profileSchema", () => {
@@ -221,18 +223,37 @@ describe("pipelineConfigPatchSchema", () => {
           expect(so.data.modulos?.copiloto_comercial?.enabled).toBeUndefined();
         }
         const ambos = pipelineConfigPatchSchema.safeParse({
-          modulos: { copiloto_comercial: { enabled: true, etapas: { [A]: "ganho" } } },
+          modulos: { copiloto_comercial: { enabled: true, etapas: { [A]: "fechamento" } } },
         });
         expect(ambos.success).toBe(true);
       });
 
-      it("aceita todo o vocabulário fechado de papéis", () => {
-        for (const papel of PAPEIS_DE_ETAPA_DO_FUNIL) {
+      it("aceita os SETE papéis configuráveis", () => {
+        expect(PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL).toHaveLength(7);
+        for (const papel of PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL) {
           const r = pipelineConfigPatchSchema.safeParse({
             modulos: { copiloto_comercial: { etapas: { [A]: papel } } },
           });
           expect(r.success, papel).toBe(true);
         }
+      });
+
+      it("REJEITA ganho e perdido no mapa: terminais vêm de is_won/is_lost, não de configuração", () => {
+        expect(PAPEIS_TERMINAIS_DA_ETAPA_DO_FUNIL).toEqual(["ganho", "perdido"]);
+        for (const papel of PAPEIS_TERMINAIS_DA_ETAPA_DO_FUNIL) {
+          const r = pipelineConfigPatchSchema.safeParse({
+            modulos: { copiloto_comercial: { etapas: { [A]: papel } } },
+          });
+          expect(r.success, papel).toBe(false);
+        }
+      });
+
+      it("o vocabulário inteiro é configuráveis + terminais, sem sobreposição", () => {
+        expect([...PAPEIS_DE_ETAPA_DO_FUNIL]).toEqual([
+          ...PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL,
+          ...PAPEIS_TERMINAIS_DA_ETAPA_DO_FUNIL,
+        ]);
+        expect(new Set(PAPEIS_DE_ETAPA_DO_FUNIL).size).toBe(PAPEIS_DE_ETAPA_DO_FUNIL.length);
       });
 
       it("rejeita papel desconhecido, nome de coluna e maiúscula", () => {

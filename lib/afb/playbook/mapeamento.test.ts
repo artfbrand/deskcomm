@@ -85,7 +85,7 @@ describe("lerConfiguracaoDoCopiloto", () => {
     }
   });
 
-  it("descarta entrada inválida (papel desconhecido, nome de coluna, chave vazia, número) e conta", () => {
+  it("descarta entrada inválida (papel desconhecido, nome de coluna, TERMINAL, chave vazia, número) e conta", () => {
     const c = lerConfiguracaoDoCopiloto({
       modulos: {
         copiloto_comercial: {
@@ -93,15 +93,16 @@ describe("lerConfiguracaoDoCopiloto", () => {
             [ID.semContato]: "prospeccao",
             [ID.contatoFeito]: "Contato Feito", // nome, não papel
             [ID.preVenda]: "papel_inventado",
-            [ID.ganho]: "ganho", // vocabulário fechado do core: aceito
+            [ID.ganho]: "ganho", // terminal: só is_won produz — descartado
+            [ID.posVenda]: "perdido", // idem
             "": "conversa",
             [ID.fechamento]: 7,
           },
         },
       },
     });
-    expect(c.etapas).toEqual({ [ID.semContato]: "prospeccao", [ID.ganho]: "ganho" });
-    expect(c.descartadas).toBe(4);
+    expect(c.etapas).toEqual({ [ID.semContato]: "prospeccao" });
+    expect(c.descartadas).toBe(6);
   });
 
   it("não olha enabled: o gate é de outro arquivo", () => {
@@ -142,15 +143,16 @@ describe("papelDaEtapaDoFunil", () => {
     });
   });
 
-  it("ganho/perdido configurados numa coluna SEM marcação valem como escolha explícita", () => {
-    const explicita = lerConfiguracaoDoCopiloto({
-      modulos: { copiloto_comercial: { etapas: { [ID.posVenda]: "ganho" } } },
+  it("configuração manual NÃO transforma coluna aberta em terminal: ganho/perdido no jsonb são ignorados", () => {
+    const manual = lerConfiguracaoDoCopiloto({
+      modulos: { copiloto_comercial: { etapas: { [ID.posVenda]: "ganho", [ID.fechamento]: "perdido" } } },
     });
-    expect(papelDaEtapaDoFunil(etapa(ID.posVenda), explicita)).toEqual({
-      mapeada: true,
-      papel: papel("ganho"),
-      origem: "configuracao",
-    });
+    // Sem a marcação do CRM, a coluna fica «não mapeada» — nunca «ganho».
+    expect(papelDaEtapaDoFunil(etapa(ID.posVenda), manual)).toEqual({ mapeada: false, motivo: "sem_configuracao" });
+    expect(papelDaEtapaDoFunil(etapa(ID.fechamento), manual)).toEqual({ mapeada: false, motivo: "sem_configuracao" });
+    // E com a marcação, é a marcação que fala — não o jsonb.
+    expect(papelDaEtapaDoFunil(etapa(ID.posVenda, { is_won: true }), manual)).toMatchObject({ papel: papel("ganho"), origem: "marcacao" });
+    expect(papelDaEtapaDoFunil(etapa(ID.fechamento, { is_lost: true }), manual)).toMatchObject({ papel: papel("perdido"), origem: "marcacao" });
   });
 
   it("coluna sem configuração é «não mapeada», declarado — nunca um chute", () => {

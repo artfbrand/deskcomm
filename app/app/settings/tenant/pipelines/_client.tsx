@@ -22,6 +22,7 @@ import { camposDoFunil } from "@/lib/leads/campos-do-funil";
 import { moduloDeFunilAtivo } from "@/lib/pipelines/modulos";
 import { customFieldSchema, type CustomFieldDef } from "@/lib/schemas/settings";
 import { Plus, Trash } from "@/lib/ui/icons";
+import { CopilotoMappingSection } from "./_copiloto";
 import { AgentMappingSection, ancoraDoMapeamento } from "./_mapping";
 import { StagesSection, ancoraDasEtapas } from "./_stages";
 
@@ -281,6 +282,17 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
           </p>
         </div>
       </div>
+
+      {/* A seção do mapa só existe com o interruptor LIGADO — o mesmo padrão
+          das opções de um campo «select», que só aparecem quando o tipo é
+          select. Segue o estado local do interruptor, não o salvo: quem liga
+          quer ver na hora o que vai configurar. Ela salva sozinha e só o mapa;
+          o botão abaixo salva o resto (e o interruptor). */}
+      {copilotoComercial && (
+        <div className="border-t border-border pt-4">
+          <CopilotoMappingSection pipelineId={pipeline.id} settings={pipeline.settings} />
+        </div>
+      )}
 
       <div className="flex sm:justify-end">
         <Button onClick={handleSave} disabled={isPending} className="w-full sm:w-auto">

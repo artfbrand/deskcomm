@@ -34,9 +34,11 @@
  * estado declarado — o painel mostra "esta coluna não está configurada", não
  * um chute.
  */
+import { lerMapaDeEtapasDoCopiloto, type MapaDeEtapasDoCopiloto } from "@/lib/pipelines/modulos";
+
 import type { EtapaId } from "./etapas";
 import { ehEtapaId } from "./etapas";
-import { ehPapelId, papel, type PapelDaEtapa, type PapelId } from "./papeis";
+import { papel, type PapelDaEtapa } from "./papeis";
 
 /** O mínimo de uma etapa do funil que a regra precisa — estrutural, para não depender do tipo do board. */
 export interface EtapaDoFunilMinima {
@@ -45,41 +47,14 @@ export interface EtapaDoFunilMinima {
   is_lost: boolean;
 }
 
-export interface ConfiguracaoDoCopiloto {
-  /** `{ [stageId]: papel }` — só entradas válidas sobrevivem à leitura. */
-  etapas: Readonly<Record<string, PapelId>>;
-  /** Quantas entradas do jsonb foram descartadas por forma inválida. Zero é o normal. */
-  descartadas: number;
-}
-
-function objetoSimples(valor: unknown): valor is Record<string, unknown> {
-  return typeof valor === "object" && valor !== null && !Array.isArray(valor);
-}
-
 /**
- * Lê `settings.modulos.copiloto_comercial.etapas` sem confiar na forma.
- * Não olha `enabled` — isso é do gate (`lib/afb/gate.ts`); aqui só o mapa.
+ * O mapa lido do jsonb — a leitura defensiva é do CORE
+ * (`lib/pipelines/modulos.ts`), porque a tela de funis também precisa dela e
+ * não pode importar de `lib/afb`. Aqui só o nome que este módulo usa.
  */
-export function lerConfiguracaoDoCopiloto(
-  settings: Record<string, unknown> | null | undefined,
-): ConfiguracaoDoCopiloto {
-  const vazio: ConfiguracaoDoCopiloto = { etapas: {}, descartadas: 0 };
-  if (!objetoSimples(settings)) return vazio;
-  const modulos = settings.modulos;
-  if (!objetoSimples(modulos)) return vazio;
-  const modulo = modulos.copiloto_comercial;
-  if (!objetoSimples(modulo)) return vazio;
-  const etapas = modulo.etapas;
-  if (!objetoSimples(etapas)) return vazio;
+export type ConfiguracaoDoCopiloto = MapaDeEtapasDoCopiloto;
 
-  const validas: Record<string, PapelId> = {};
-  let descartadas = 0;
-  for (const [stageId, valor] of Object.entries(etapas)) {
-    if (stageId.trim() !== "" && ehPapelId(valor)) validas[stageId] = valor;
-    else descartadas += 1;
-  }
-  return { etapas: validas, descartadas };
-}
+export const lerConfiguracaoDoCopiloto = lerMapaDeEtapasDoCopiloto;
 
 export type PapelResolvido =
   | { mapeada: true; papel: PapelDaEtapa; origem: "marcacao" | "configuracao" }

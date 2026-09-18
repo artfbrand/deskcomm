@@ -24,7 +24,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { mergeConfiguracaoDeModulos, moduloDeFunilAtivo } from "./modulos";
+import {
+  ehPapelConfiguravelDaEtapaDoFunil,
+  ehPapelDaEtapaDoFunil,
+  lerMapaDeEtapasDoCopiloto,
+  mergeConfiguracaoDeModulos,
+  moduloDeFunilAtivo,
+} from "./modulos";
 
 const A = "11111111-1111-4111-8111-000000000001";
 const B = "11111111-1111-4111-8111-000000000002";
@@ -66,6 +72,42 @@ describe("moduloDeFunilAtivo", () => {
 
   it("ignora chaves herdadas do protótipo", () => {
     expect(moduloDeFunilAtivo({ modulos: {} }, "toString")).toBe(false);
+  });
+});
+
+describe("lerMapaDeEtapasDoCopiloto", () => {
+  it("lê os configuráveis e descarta ganho/perdido, nome de coluna, chave vazia e tipo errado", () => {
+    const r = lerMapaDeEtapasDoCopiloto({
+      modulos: {
+        copiloto_comercial: {
+          etapas: {
+            [A]: "conversa",
+            [B]: "ganho", // terminal: só is_won produz
+            "33333333-3333-4333-8333-000000000003": "perdido",
+            "44444444-4444-4444-8444-000000000004": "Contato Feito",
+            "": "prospeccao",
+            "55555555-5555-4555-8555-000000000005": 1,
+          },
+        },
+      },
+    });
+    expect(r.etapas).toEqual({ [A]: "conversa" });
+    expect(r.descartadas).toBe(5);
+  });
+
+  it("devolve vazio para settings ausente, sem módulo, ou etapas em forma errada", () => {
+    for (const s of [null, undefined, {}, { modulos: [] }, { modulos: { copiloto_comercial: {} } }, { modulos: { copiloto_comercial: { etapas: [] } } }]) {
+      expect(lerMapaDeEtapasDoCopiloto(s as never)).toEqual({ etapas: {}, descartadas: 0 });
+    }
+  });
+
+  it("ehPapelDaEtapaDoFunil aceita os nove; ehPapelConfiguravelDaEtapaDoFunil só os sete", () => {
+    expect(ehPapelDaEtapaDoFunil("ganho")).toBe(true);
+    expect(ehPapelConfiguravelDaEtapaDoFunil("ganho")).toBe(false);
+    expect(ehPapelConfiguravelDaEtapaDoFunil("perdido")).toBe(false);
+    expect(ehPapelConfiguravelDaEtapaDoFunil("conversa")).toBe(true);
+    expect(ehPapelConfiguravelDaEtapaDoFunil("Conversa")).toBe(false);
+    expect(ehPapelConfiguravelDaEtapaDoFunil(null)).toBe(false);
   });
 });
 

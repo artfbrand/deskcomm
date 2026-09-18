@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { PAPEIS_DE_ETAPA_DO_FUNIL } from "@/lib/schemas/settings";
+import { PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL, PAPEIS_DE_ETAPA_DO_FUNIL } from "@/lib/schemas/settings";
 
 import { ETAPAS_IDS, etapaDoPlaybook } from "./etapas";
-import { PAPEIS_DE_ETAPA, PAPEIS_IDS, ehPapelId, papel } from "./papeis";
+import { PAPEIS_CONFIGURAVEIS, PAPEIS_DE_ETAPA, PAPEIS_IDS, PAPEIS_TERMINAIS, ehPapelConfiguravel, ehPapelId, papel } from "./papeis";
 
 describe("PAPEIS_DE_ETAPA", () => {
   it("cobre todos os ids, sem repetição — e os ids são o vocabulário do core", () => {
@@ -50,9 +50,15 @@ describe("PAPEIS_DE_ETAPA", () => {
     ]);
   });
 
-  it("ganho e perdido são os únicos terminais, sem etapa de WhatsApp", () => {
-    expect(PAPEIS_DE_ETAPA.filter((p) => p.terminal).map((p) => p.id)).toEqual(["ganho", "perdido"]);
-    for (const id of ["ganho", "perdido"] as const) expect(papel(id).etapas).toEqual([]);
+  it("ganho e perdido são os únicos terminais, sem etapa de WhatsApp, e NÃO são configuráveis", () => {
+    expect(PAPEIS_DE_ETAPA.filter((p) => p.terminal).map((p) => p.id)).toEqual([...PAPEIS_TERMINAIS]);
+    for (const id of PAPEIS_TERMINAIS) {
+      expect(papel(id).etapas).toEqual([]);
+      expect(ehPapelConfiguravel(id)).toBe(false);
+    }
+    // Os dois conjuntos são complementares e o flag `terminal` acompanha.
+    expect([...PAPEIS_CONFIGURAVEIS]).toEqual([...PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL]);
+    expect(PAPEIS_DE_ETAPA.filter((p) => !p.terminal).map((p) => p.id)).toEqual([...PAPEIS_CONFIGURAVEIS]);
   });
 
   it("ehPapelId aceita o vocabulário inteiro e recusa nome de coluna, maiúscula e tipo errado", () => {

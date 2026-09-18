@@ -31,11 +31,73 @@
  * quer tirar uma entrada manda o mapa sem ela. E um deep-merge genérico erra
  * também em array: array se substitui, não se concatena.
  */
-import type { ModulosDeFunil } from "@/lib/schemas/settings";
+import {
+  PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL,
+  PAPEIS_DE_ETAPA_DO_FUNIL,
+  type ModulosDeFunil,
+  type PapelConfiguravelDaEtapaDoFunil,
+  type PapelDaEtapaDoFunil,
+} from "@/lib/schemas/settings";
 
 /** Objeto simples, não-nulo, não-array — a única forma que um jsonb de módulos pode ter. */
 function objetoSimples(valor: unknown): valor is Record<string, unknown> {
   return typeof valor === "object" && valor !== null && !Array.isArray(valor);
+}
+
+/** Aceita valor cru e devolve o papel só se for um do vocabulário INTEIRO (inclui os terminais). */
+export function ehPapelDaEtapaDoFunil(valor: unknown): valor is PapelDaEtapaDoFunil {
+  return (
+    typeof valor === "string" && (PAPEIS_DE_ETAPA_DO_FUNIL as readonly string[]).includes(valor)
+  );
+}
+
+/** Aceita valor cru (jsonb) e devolve o papel só se for um que o ADMINISTRADOR pode escolher. */
+export function ehPapelConfiguravelDaEtapaDoFunil(
+  valor: unknown,
+): valor is PapelConfiguravelDaEtapaDoFunil {
+  return (
+    typeof valor === "string" &&
+    (PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL as readonly string[]).includes(valor)
+  );
+}
+
+export interface MapaDeEtapasDoCopiloto {
+  /** `{ [stageId]: papel configurável }` — só entradas válidas sobrevivem à leitura. */
+  etapas: Readonly<Record<string, PapelConfiguravelDaEtapaDoFunil>>;
+  /** Quantas entradas do jsonb foram descartadas por forma inválida. Zero é o normal. */
+  descartadas: number;
+}
+
+/**
+ * Lê `settings.modulos.copiloto_comercial.etapas` sem confiar na forma.
+ *
+ * Entrada inválida é DESCARTADA e contada, nunca lança: quem chama está
+ * renderizando (a tela de funis, o inbox), e um throw por uma chave torta
+ * derrubaria a tela inteira. Não olha `enabled` — isso é `moduloDeFunilAtivo`.
+ *
+ * `ganho` e `perdido` no mapa são descartados como qualquer outro valor
+ * inválido: um jsonb antigo (ou escrito à mão) não consegue tornar terminal
+ * uma coluna que o CRM tem em aberto — só `is_won`/`is_lost` fazem isso.
+ */
+export function lerMapaDeEtapasDoCopiloto(
+  settings: Record<string, unknown> | null | undefined,
+): MapaDeEtapasDoCopiloto {
+  const vazio: MapaDeEtapasDoCopiloto = { etapas: {}, descartadas: 0 };
+  if (!objetoSimples(settings)) return vazio;
+  const modulos = settings.modulos;
+  if (!objetoSimples(modulos)) return vazio;
+  const modulo = modulos.copiloto_comercial;
+  if (!objetoSimples(modulo)) return vazio;
+  const etapas = modulo.etapas;
+  if (!objetoSimples(etapas)) return vazio;
+
+  const validas: Record<string, PapelConfiguravelDaEtapaDoFunil> = {};
+  let descartadas = 0;
+  for (const [stageId, valor] of Object.entries(etapas)) {
+    if (stageId.trim() !== "" && ehPapelConfiguravelDaEtapaDoFunil(valor)) validas[stageId] = valor;
+    else descartadas += 1;
+  }
+  return { etapas: validas, descartadas };
 }
 
 /**

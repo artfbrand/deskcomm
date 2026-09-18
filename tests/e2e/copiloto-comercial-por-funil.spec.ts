@@ -10,7 +10,13 @@
  *      Os dois sentidos entram porque um merge que só ADICIONA passaria no
  *      "ligar" e falharia em silêncio no "desligar".
  *
- *   2. Quem NÃO pode editar configuração não vê o interruptor — o `manager`
+ *   2. Com o interruptor LIGADO aparece «Mapeamento do Copiloto», com uma
+ *      linha por coluna real do funil: coluna comum tem seletor; coluna
+ *      marcada como fechamento/desistência aparece como «Ganho»/«Perdido
+ *      (automático)», sem seletor — a marcação do CRM é a autoridade. E o
+ *      seletor nunca oferece Ganho/Perdido.
+ *
+ *   3. Quem NÃO pode editar configuração não vê o interruptor — o `manager`
  *      abre a tela (é o piso dela) mas o `PipelineEditor` inteiro só nasce com
  *      `podeEditarConfig`. Nenhuma regra nova de autorização: é a existente,
  *      medida pela tela.
@@ -78,6 +84,36 @@ test("admin liga, salva, recarrega, continua ligado; desliga, salva, recarrega, 
   // ── LIGAR ──────────────────────────────────────────────────────────────────
   if (!(await interruptor.isChecked())) await interruptor.click();
   await expect(interruptor).toBeChecked();
+
+  // ── O MAPA APARECE NA HORA, COM AS COLUNAS REAIS ──────────────────────────
+  const mapa = editor.locator('[data-testid^="copiloto-mapeamento-"]');
+  await expect(mapa, "ligar o interruptor mostra a seção do mapa sem precisar salvar").toBeVisible();
+  await expect(mapa.getByRole("heading", { name: /mapeamento do copiloto/i })).toBeVisible();
+  const linhas = mapa.locator('[data-testid^="copiloto-etapa-"]');
+  await expect(linhas.first()).toBeVisible();
+  const seletores = mapa.locator('[data-testid^="copiloto-papel-"]:not([data-testid^="copiloto-papel-automatico-"])');
+  const automaticos = mapa.locator('[data-testid^="copiloto-papel-automatico-"]');
+  // Toda coluna é UMA das duas coisas: tem seletor ou é automática — nunca as
+  // duas, nunca nenhuma.
+  expect((await seletores.count()) + (await automaticos.count()), "cada coluna é seletor OU automática").toBe(
+    await linhas.count(),
+  );
+  expect(await seletores.count(), "o funil semeado tem pelo menos uma coluna comum").toBeGreaterThan(0);
+  // O funil semeado tem fechamento e desistência marcados → os dois automáticos.
+  await expect(mapa.getByText(/ganho \(automático\)/i)).toBeVisible();
+  await expect(mapa.getByText(/perdido \(automático\)/i)).toBeVisible();
+  // Um seletor comum: oferece «Não mapeada» + 7 papéis, e NUNCA Ganho/Perdido.
+  await seletores.first().click();
+  const opcoes = page.getByRole("option");
+  await expect(opcoes).toHaveCount(8);
+  await expect(opcoes.filter({ hasText: /^Ganho$/ })).toHaveCount(0);
+  await expect(opcoes.filter({ hasText: /^Perdido$/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.screenshot({
+    path: path.join(EVIDENCIA, "copiloto-por-funil-00-mapa-visivel.png"),
+    fullPage: true,
+  });
+
   await salvarERecarregar(page);
   await expect(
     editorDoPrimeiroFunil(page).getByTestId("copiloto-comercial-liga"),
@@ -91,6 +127,10 @@ test("admin liga, salva, recarrega, continua ligado; desliga, salva, recarrega, 
   // ── DESLIGAR ───────────────────────────────────────────────────────────────
   await editorDoPrimeiroFunil(page).getByTestId("copiloto-comercial-liga").click();
   await expect(editorDoPrimeiroFunil(page).getByTestId("copiloto-comercial-liga")).not.toBeChecked();
+  await expect(
+    editorDoPrimeiroFunil(page).locator('[data-testid^="copiloto-mapeamento-"]'),
+    "desligar esconde o mapa",
+  ).toHaveCount(0);
   await salvarERecarregar(page);
   await expect(
     editorDoPrimeiroFunil(page).getByTestId("copiloto-comercial-liga"),

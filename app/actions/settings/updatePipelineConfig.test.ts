@@ -146,9 +146,9 @@ describe("updatePipelineConfig — preservação de settings", () => {
     expect(topo).toEqual(topoAtual);
   });
 
-  it("rejeita papel inválido e stage id vazio antes de tocar no banco", async () => {
+  it("rejeita papel inválido, papel terminal e stage id vazio antes de tocar no banco", async () => {
     const { updatePipelineConfig } = await import("./updatePipelineConfig");
-    for (const etapas of [{ [STAGE_A]: "papel_inventado" }, { "": "conversa" }]) {
+    for (const etapas of [{ [STAGE_A]: "papel_inventado" }, { [STAGE_A]: "ganho" }, { [STAGE_A]: "perdido" }, { "": "conversa" }]) {
       const gravado = comFunil(structuredClone(SETTINGS_ATUAIS));
       const r = await updatePipelineConfig(PIPELINE, {
         modulos: { copiloto_comercial: { etapas: etapas as never } },
