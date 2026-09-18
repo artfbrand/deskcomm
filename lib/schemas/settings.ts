@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 
+import { ehPlaybookId } from "@/lib/afb/playbooks/catalogo";
 import { ehHexValido } from "@/lib/branding/rampa";
 import { IDIOMAS } from "@/lib/i18n/idiomas";
 import { MOEDAS_SERVIDAS } from "@/lib/money";
@@ -221,9 +222,26 @@ export type PapelDaEtapaDoFunil = (typeof PAPEIS_DE_ETAPA_DO_FUNIL)[number];
  * nome; o id nasce do banco. Quando enviado, o mapa SUBSTITUI o anterior
  * inteiro (não há merge por stageId): é a única forma de DESMAPEAR uma coluna.
  */
+/**
+ * `playbook_id` é QUAL roteiro comercial o copiloto usa neste funil — um id do
+ * catálogo (`lib/afb/playbooks/catalogo.ts`, identidade leve: este arquivo NÃO
+ * importa o registry nem o conteúdo), nunca o nome ou o slug do funil:
+ * dois funis podem usar o mesmo playbook, e um funil pode trocar o seu.
+ *
+ * Só ids REGISTRADOS entram (`ehPlaybookId`): um id solto gravado hoje vira
+ * "sem playbook" silencioso amanhã, e é melhor recusar na escrita do que
+ * descobrir na tela. `null` é "limpar a escolha"; ausente é "não mexa".
+ * Configuração sem `playbook_id` continua válida — é o estado legado, e a
+ * leitura o declara como "sem playbook configurado" em vez de inventar um.
+ */
 export const copilotoComercialSchema = z
   .object({
     enabled: z.boolean().optional(),
+    playbook_id: z
+      .string()
+      .refine(ehPlaybookId, { message: "Playbook desconhecido" })
+      .nullable()
+      .optional(),
     etapas: z.record(z.uuid(), z.enum(PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL)).optional(),
   })
   .strict();

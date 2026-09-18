@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { PAPEIS_CONFIGURAVEIS_DA_ETAPA_DO_FUNIL, PAPEIS_DE_ETAPA_DO_FUNIL } from "@/lib/schemas/settings";
 
-import { ETAPAS_IDS, etapaDoPlaybook } from "./etapas";
+import { ETAPAS_IDS, etapaEstrutural } from "./etapas";
 import { PAPEIS_CONFIGURAVEIS, PAPEIS_DE_ETAPA, PAPEIS_IDS, PAPEIS_TERMINAIS, ehPapelConfiguravel, ehPapelId, papel } from "./papeis";
 
 describe("PAPEIS_DE_ETAPA", () => {
@@ -22,7 +22,7 @@ describe("PAPEIS_DE_ETAPA", () => {
   });
 
   it("toda etapa referida por um papel existe no playbook", () => {
-    for (const p of PAPEIS_DE_ETAPA) for (const e of p.etapas) expect(etapaDoPlaybook(e).id).toBe(e);
+    for (const p of PAPEIS_DE_ETAPA) for (const e of p.etapas) expect(etapaEstrutural(e).id).toBe(e);
   });
 
   it("uma coluna pode abrigar várias etapas: «conversa» vai da qualificação ao convite, em ordem", () => {

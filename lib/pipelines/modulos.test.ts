@@ -25,6 +25,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  playbookIdDoCopiloto,
   ehPapelConfiguravelDaEtapaDoFunil,
   ehPapelDaEtapaDoFunil,
   lerMapaDeEtapasDoCopiloto,
@@ -195,6 +196,50 @@ describe("mergeConfiguracaoDeModulos — nível 3 (dentro do módulo)", () => {
       const r = mergeConfiguracaoDeModulos({ copiloto_comercial: modulo }, { copiloto_comercial: { enabled: true } });
       expect(r).toEqual({ copiloto_comercial: { enabled: true } });
     }
+  });
+});
+
+describe("mergeConfiguracaoDeModulos — playbook_id é a terceira propriedade do módulo", () => {
+  const atual = {
+    copiloto_comercial: { enabled: true, playbook_id: "afb_comercial_v1", etapas: { [A]: "conversa" } },
+  };
+
+  it("salvar enabled preserva playbook_id e etapas", () => {
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { enabled: false } });
+    expect(r.copiloto_comercial).toEqual({ enabled: false, playbook_id: "afb_comercial_v1", etapas: { [A]: "conversa" } });
+  });
+
+  it("salvar playbook_id preserva enabled e etapas", () => {
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { playbook_id: "afb_comercial_v1" } });
+    expect(r.copiloto_comercial).toEqual(atual.copiloto_comercial);
+  });
+
+  it("salvar etapas preserva playbook_id e enabled", () => {
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { etapas: { [B]: "apresentacao" } } });
+    expect(r.copiloto_comercial).toEqual({ enabled: true, playbook_id: "afb_comercial_v1", etapas: { [B]: "apresentacao" } });
+  });
+
+  it("playbook_id: null limpa a escolha sem tocar no resto", () => {
+    const r = mergeConfiguracaoDeModulos(atual, { copiloto_comercial: { playbook_id: null } });
+    expect(r.copiloto_comercial).toEqual({ enabled: true, playbook_id: null, etapas: { [A]: "conversa" } });
+  });
+});
+
+describe("playbookIdDoCopiloto — leitura genérica, só a forma", () => {
+  it("devolve o id gravado quando tem forma de id versionado", () => {
+    expect(playbookIdDoCopiloto({ modulos: { copiloto_comercial: { playbook_id: "afb_comercial_v1" } } })).toBe("afb_comercial_v1");
+    expect(playbookIdDoCopiloto({ modulos: { copiloto_comercial: { playbook_id: "qualquer_coisa_v7" } } })).toBe("qualquer_coisa_v7");
+  });
+
+  it("null para ausente, null explícito, forma errada, tipo errado ou settings torto", () => {
+    expect(playbookIdDoCopiloto(null)).toBeNull();
+    expect(playbookIdDoCopiloto({})).toBeNull();
+    expect(playbookIdDoCopiloto({ modulos: { copiloto_comercial: { enabled: true } } })).toBeNull();
+    expect(playbookIdDoCopiloto({ modulos: { copiloto_comercial: { playbook_id: null } } })).toBeNull();
+    for (const id of ["", "Comercial AFB", "afb_comercial", "AFB_V1", 1, {}, []]) {
+      expect(playbookIdDoCopiloto({ modulos: { copiloto_comercial: { playbook_id: id } } }), String(id)).toBeNull();
+    }
+    expect(playbookIdDoCopiloto({ modulos: [] })).toBeNull();
   });
 });
 

@@ -101,6 +101,26 @@ export function lerMapaDeEtapasDoCopiloto(
 }
 
 /**
+ * Lê `settings.modulos.copiloto_comercial.playbook_id` sem confiar na forma —
+ * e sem consultar registry nenhum: o core sabe que existe um id versionado
+ * (`<nome>_v<n>`); QUAL playbook ele designa é da camada que os registra
+ * (`lib/afb/gate.ts`). `null` para ausente, `null` explícito, tipo errado ou
+ * forma que não é de id.
+ */
+export function playbookIdDoCopiloto(
+  settings: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!objetoSimples(settings)) return null;
+  const modulos = settings.modulos;
+  if (!objetoSimples(modulos)) return null;
+  const modulo = modulos.copiloto_comercial;
+  if (!objetoSimples(modulo)) return null;
+  const id = modulo.playbook_id;
+  if (typeof id !== "string" || !/^[a-z0-9_]+_v\d+$/.test(id)) return null;
+  return id;
+}
+
+/**
  * Lê `settings.modulos[modulo].enabled` sem confiar na forma.
  *
  * `true` só quando o caminho inteiro existe, é objeto em cada nível e o

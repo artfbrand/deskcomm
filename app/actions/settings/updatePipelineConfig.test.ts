@@ -39,7 +39,7 @@ const SETTINGS_ATUAIS = {
   identity_resolution: { fields_in_priority_order: ["cpf", "phone_e164", "email"] },
   modulos: {
     outro_modulo: { enabled: true },
-    copiloto_comercial: { enabled: true, etapas: { [STAGE_A]: "conversa" } },
+    copiloto_comercial: { enabled: true, playbook_id: "afb_comercial_v1", etapas: { [STAGE_A]: "conversa" } },
   },
 };
 
@@ -93,7 +93,7 @@ describe("updatePipelineConfig — preservação de settings", () => {
       ...SETTINGS_ATUAIS,
       modulos: {
         outro_modulo: { enabled: true },
-        copiloto_comercial: { enabled: true, etapas: { [STAGE_A]: "conversa" } },
+        copiloto_comercial: { enabled: true, playbook_id: "afb_comercial_v1", etapas: { [STAGE_A]: "conversa" } },
       },
     });
   });
@@ -124,8 +124,38 @@ describe("updatePipelineConfig — preservação de settings", () => {
 
     expect((gravado.settings as { modulos: unknown }).modulos).toEqual({
       outro_modulo: { enabled: true },
-      copiloto_comercial: { enabled: false, etapas: { [STAGE_A]: "conversa" } },
+      copiloto_comercial: { enabled: false, playbook_id: "afb_comercial_v1", etapas: { [STAGE_A]: "conversa" } },
     });
+  });
+
+  it("salvar playbook_id preserva enabled, etapas e os outros módulos; salvar etapas preserva playbook_id", async () => {
+    const gravado = comFunil(structuredClone(SETTINGS_ATUAIS));
+    const { updatePipelineConfig } = await import("./updatePipelineConfig");
+
+    await updatePipelineConfig(PIPELINE, { modulos: { copiloto_comercial: { playbook_id: "afb_comercial_v1" } } });
+    expect((gravado.settings as { modulos: unknown }).modulos).toEqual(SETTINGS_ATUAIS.modulos);
+
+    await updatePipelineConfig(PIPELINE, { modulos: { copiloto_comercial: { etapas: { [STAGE_B]: "apresentacao" } } } });
+    expect((gravado.settings as { modulos: { copiloto_comercial: unknown } }).modulos.copiloto_comercial).toEqual({
+      enabled: true,
+      playbook_id: "afb_comercial_v1",
+      etapas: { [STAGE_B]: "apresentacao" },
+    });
+  });
+
+  it("playbook_id: null limpa a escolha; id desconhecido é 422 sem tocar no banco", async () => {
+    const { updatePipelineConfig } = await import("./updatePipelineConfig");
+    const gravado = comFunil(structuredClone(SETTINGS_ATUAIS));
+    await updatePipelineConfig(PIPELINE, { modulos: { copiloto_comercial: { playbook_id: null } } });
+    expect((gravado.settings as { modulos: { copiloto_comercial: { playbook_id: unknown } } }).modulos.copiloto_comercial.playbook_id).toBeNull();
+
+    const gravado2 = comFunil(structuredClone(SETTINGS_ATUAIS));
+    const r = await updatePipelineConfig(PIPELINE, {
+      modulos: { copiloto_comercial: { playbook_id: "afb_comercial_v9" as never } },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("validation_failed");
+    expect(gravado2.settings).toBeUndefined();
   });
 
   it("salvar o mapa de etapas NÃO apaga enabled, e substitui o mapa inteiro", async () => {
@@ -138,7 +168,7 @@ describe("updatePipelineConfig — preservação de settings", () => {
 
     expect((gravado.settings as { modulos: unknown }).modulos).toEqual({
       outro_modulo: { enabled: true },
-      copiloto_comercial: { enabled: true, etapas: { [STAGE_B]: "apresentacao" } },
+      copiloto_comercial: { enabled: true, playbook_id: "afb_comercial_v1", etapas: { [STAGE_B]: "apresentacao" } },
     });
     // E as chaves de topo seguem intactas.
     const { modulos: _m, ...topo } = gravado.settings as Record<string, unknown>;

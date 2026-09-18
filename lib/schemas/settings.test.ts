@@ -287,6 +287,32 @@ describe("pipelineConfigPatchSchema", () => {
         expect(pipelineConfigPatchSchema.safeParse({ modulos: { copiloto_comercial: { etapas: {} } } }).success).toBe(true);
       });
 
+      it("playbook_id aceita só id REGISTRADO, aceita null (limpar) e ausente (não mexe)", () => {
+        const ok = pipelineConfigPatchSchema.safeParse({
+          modulos: { copiloto_comercial: { playbook_id: "afb_comercial_v1" } },
+        });
+        expect(ok.success).toBe(true);
+        if (ok.success) expect(ok.data.modulos?.copiloto_comercial?.playbook_id).toBe("afb_comercial_v1");
+        expect(pipelineConfigPatchSchema.safeParse({ modulos: { copiloto_comercial: { playbook_id: null } } }).success).toBe(true);
+        const semId = pipelineConfigPatchSchema.safeParse({ modulos: { copiloto_comercial: { enabled: true } } });
+        expect(semId.success).toBe(true);
+        if (semId.success) expect(semId.data.modulos?.copiloto_comercial?.playbook_id).toBeUndefined();
+      });
+
+      it("playbook_id desconhecido, vazio, nome de funil ou tipo errado é rejeitado", () => {
+        for (const id of ["afb_comercial_v9", "", "Comercial AFB", "comercial-afb", 1, true, {}]) {
+          const r = pipelineConfigPatchSchema.safeParse({ modulos: { copiloto_comercial: { playbook_id: id } } });
+          expect(r.success, String(id)).toBe(false);
+        }
+      });
+
+      it("enabled + playbook_id + etapas coexistem no mesmo patch", () => {
+        const r = pipelineConfigPatchSchema.safeParse({
+          modulos: { copiloto_comercial: { enabled: true, playbook_id: "afb_comercial_v1", etapas: { [A]: "conversa" } } },
+        });
+        expect(r.success).toBe(true);
+      });
+
       it("rejeita propriedade desconhecida no módulo (strict)", () => {
         const r = pipelineConfigPatchSchema.safeParse({
           modulos: { copiloto_comercial: { enabled: true, etapa: {} } },
