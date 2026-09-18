@@ -11,7 +11,7 @@
  *      seções voltariam a se apagar.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -36,6 +36,7 @@ vi.mock("./_mapping", () => ({
 
 import { apiClient } from "@/lib/api/client";
 import { updatePipelineConfig } from "@/app/actions/settings/updatePipelineConfig";
+import { listarMetadadosDePlaybooks } from "@/lib/afb/playbooks/catalogo";
 import { PipelinesClient, type PipelineRow } from "./_client";
 
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -112,5 +113,98 @@ describe("PipelineEditor — interruptor e seção do mapa", () => {
     // Preservar `etapas` é trabalho do merge na action, e ele só consegue
     // porque a tela NÃO reenvia o mapa por conta própria.
     expect("etapas" in (patch.modulos!.copiloto_comercial as object)).toBe(false);
+    // E o playbook, que não foi tocado, também NÃO viaja — é o merge que o preserva.
+    expect("playbook_id" in (patch.modulos!.copiloto_comercial as object)).toBe(false);
+  });
+});
+
+describe("PipelineEditor — seletor de playbook", () => {
+  const COM_PLAYBOOK = {
+    modulos: { copiloto_comercial: { enabled: true, playbook_id: "afb_comercial_v1", etapas: { [STAGE]: "prospeccao" } } },
+  };
+
+  it("só aparece com o módulo ligado, e some ao desligar", async () => {
+    const user = userEvent.setup();
+    montar({ fields: [] });
+    expect(screen.queryByTestId(`copiloto-playbook-${PIPE}`)).toBeNull();
+    await user.click(screen.getByTestId("copiloto-comercial-liga"));
+    expect(screen.getByTestId(`copiloto-playbook-${PIPE}`)).toBeInTheDocument();
+    await user.click(screen.getByTestId("copiloto-comercial-liga"));
+    expect(screen.queryByTestId(`copiloto-playbook-${PIPE}`)).toBeNull();
+  });
+
+  it("lista os playbooks do CATÁLOGO pelo nome (não pelo id cru), mais «Selecione um playbook»", async () => {
+    const user = userEvent.setup();
+    montar({ modulos: { copiloto_comercial: { enabled: true } } });
+    await user.click(screen.getByTestId("copiloto-playbook-seletor"));
+    const opcoes = within(await screen.findByRole("listbox")).getAllByRole("option").map((o) => o.textContent);
+    expect(opcoes[0]).toBe("Selecione um playbook");
+    const registrados = listarMetadadosDePlaybooks();
+    expect(registrados.length).toBeGreaterThan(0);
+    expect(opcoes.slice(1)).toEqual(registrados.map((pb) => `${pb.nome} · ${pb.versaoDoDocumento}`));
+    // Nenhuma opção é o id cru.
+    for (const pb of registrados) expect(opcoes).not.toContain(pb.id);
+  });
+
+  it("mostra a seleção atual gravada no settings", () => {
+    montar(COM_PLAYBOOK);
+    expect(screen.getByTestId("copiloto-playbook-seletor")).toHaveTextContent("Playbook Comercial — Consultoria em Energia");
+  });
+
+  it("sem playbook_id (legado) mostra «Selecione um playbook» — não escolhe nenhum sozinho", () => {
+    montar({ modulos: { copiloto_comercial: { enabled: true, etapas: { [STAGE]: "prospeccao" } } } });
+    expect(screen.getByTestId("copiloto-playbook-seletor")).toHaveTextContent("Selecione um playbook");
+  });
+
+  it("playbook_id que o registry não conhece é tratado como sem seleção, sem quebrar a tela", () => {
+    montar({ modulos: { copiloto_comercial: { enabled: true, playbook_id: "afb_prospeccao_v1" } } });
+    expect(screen.getByTestId("copiloto-playbook-seletor")).toHaveTextContent("Selecione um playbook");
+    expect(screen.getByTestId("copiloto-comercial-liga")).toHaveAttribute("data-state", "checked");
+  });
+
+  it("trocar o playbook e salvar manda playbook_id junto com enabled — e nada de etapas", async () => {
+    const user = userEvent.setup();
+    montar({ modulos: { copiloto_comercial: { enabled: true, etapas: { [STAGE]: "prospeccao" } } } });
+    await user.click(screen.getByTestId("copiloto-playbook-seletor"));
+    await user.click(await screen.findByTestId("copiloto-playbook-opcao-afb_comercial_v1"));
+    expect(screen.getByTestId("copiloto-playbook-seletor")).toHaveTextContent("Playbook Comercial");
+    await user.click(screen.getByRole("button", { name: /salvar vocabulário e campos/i }));
+
+    await waitFor(() => expect(updatePipelineConfig).toHaveBeenCalledTimes(1));
+    const patch = vi.mocked(updatePipelineConfig).mock.calls[0]![1];
+    expect(patch.modulos).toEqual({ copiloto_comercial: { enabled: true, playbook_id: "afb_comercial_v1" } });
+  });
+
+  it("voltar para «Selecione um playbook» e salvar manda playbook_id: null (limpa a escolha)", async () => {
+    const user = userEvent.setup();
+    montar(COM_PLAYBOOK);
+    await user.click(screen.getByTestId("copiloto-playbook-seletor"));
+    await user.click(await screen.findByRole("option", { name: "Selecione um playbook" }));
+    await user.click(screen.getByRole("button", { name: /salvar vocabulário e campos/i }));
+
+    await waitFor(() => expect(updatePipelineConfig).toHaveBeenCalledTimes(1));
+    const patch = vi.mocked(updatePipelineConfig).mock.calls[0]![1];
+    expect(patch.modulos).toEqual({ copiloto_comercial: { enabled: true, playbook_id: null } });
+  });
+
+  it("o mapa de etapas continua intacto ao lado do seletor: won/lost automáticos, comum com seletor", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: {
+        etapas: [
+          { id: STAGE, name: "Sem Contato", is_won: false, is_lost: false },
+          { id: "22222222-2222-4222-8222-000000000009", name: "Ganho", is_won: true, is_lost: false },
+        ],
+        mapeamento: {},
+      },
+    });
+    montar(COM_PLAYBOOK);
+    expect(await screen.findByTestId(`copiloto-papel-${STAGE}`)).toHaveTextContent("Prospecção");
+    expect(screen.getByTestId("copiloto-papel-automatico-22222222-2222-4222-8222-000000000009")).toHaveTextContent("Ganho (automático)");
+  });
+
+  it("manager (sem podeEditarConfig) não vê seletor de playbook", () => {
+    montar(COM_PLAYBOOK, false);
+    expect(screen.queryByTestId("copiloto-playbook-seletor")).toBeNull();
+    expect(screen.queryByTestId("copiloto-comercial-liga")).toBeNull();
   });
 });

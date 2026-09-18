@@ -4087,6 +4087,11 @@ export const DICIONARIO: Traducoes = {
   "Exibe o copiloto comercial na caixa de entrada para leads deste funil.": {
     es: "Muestra el copiloto comercial en la bandeja de entrada para los leads de este embudo.",
   },
+  "Playbook do Copiloto": { es: "Playbook del Copiloto" },
+  "Qual roteiro comercial o copiloto usa neste funil. Sem escolha, o painel não aparece na caixa de entrada.": {
+    es: "Qué guion comercial usa el copiloto en este embudo. Sin elección, el panel no aparece en la bandeja de entrada.",
+  },
+  "Selecione um playbook": { es: "Selecciona un playbook" },
   "Mapeamento do Copiloto": { es: "Mapeo del Copiloto" },
   "O que cada coluna deste funil significa para o copiloto comercial. Ganho e Perdido seguem a marcação da própria etapa.": {
     es: "Qué significa cada columna de este embudo para el copiloto comercial. Ganado y Perdido siguen la marca de la propia etapa.",
