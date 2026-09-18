@@ -4087,6 +4087,68 @@ export const DICIONARIO: Traducoes = {
   "Exibe o copiloto comercial na caixa de entrada para leads deste funil.": {
     es: "Muestra el copiloto comercial en la bandeja de entrada para los leads de este embudo.",
   },
+  // ── Copiloto comercial no inbox (painel lateral) ──
+  "Copiloto": { es: "Copiloto" },
+  "Painel da conversa": { es: "Panel de la conversación" },
+  "Carregando o contexto do copiloto…": { es: "Cargando el contexto del copiloto…" },
+  "O copiloto só funciona em conversas que você pode ver.": { es: "El copiloto solo funciona en conversaciones que puedes ver." },
+  "Não foi possível carregar o copiloto agora.": { es: "No se pudo cargar el copiloto ahora." },
+  "Tente de novo em instantes. Se continuar, avise quem administra o sistema.": {
+    es: "Inténtalo de nuevo en unos instantes. Si persiste, avisa a quien administra el sistema.",
+  },
+  "Esta conversa não tem contato vinculado.": { es: "Esta conversación no tiene contacto vinculado." },
+  "Sem contato não há oportunidade para o copiloto acompanhar.": { es: "Sin contacto no hay oportunidad que el copiloto pueda acompañar." },
+  "Este contato ainda não tem uma oportunidade aberta.": { es: "Este contacto aún no tiene una oportunidad abierta." },
+  "Crie a oportunidade no funil pela aba Contato para o copiloto acompanhar a conversa.": {
+    es: "Crea la oportunidad en el embudo desde la pestaña Contacto para que el copiloto acompañe la conversación.",
+  },
+  "Há mais de uma oportunidade ativa vinculada a este contato.": { es: "Hay más de una oportunidad activa vinculada a este contacto." },
+  "Selecione ou organize a oportunidade correta no CRM antes de usar o copiloto. Ele não escolhe sozinho.": {
+    es: "Selecciona u organiza la oportunidad correcta en el CRM antes de usar el copiloto. Él no elige solo.",
+  },
+  "A oportunidade aponta para um funil ou uma etapa que não está disponível.": {
+    es: "La oportunidad apunta a un embudo o a una etapa que no está disponible.",
+  },
+  "Abra a oportunidade no CRM e confira o funil e a etapa dela.": { es: "Abre la oportunidad en el CRM y revisa su embudo y su etapa." },
+  "O copiloto comercial está desligado neste funil.": { es: "El copiloto comercial está apagado en este embudo." },
+  "Quem administra a organização liga o copiloto em Configurações › Funis.": {
+    es: "Quien administra la organización activa el copiloto en Configuración › Embudos.",
+  },
+  "Este funil ainda não tem um playbook escolhido.": { es: "Este embudo aún no tiene un playbook elegido." },
+  "Quem administra a organização escolhe o playbook do copiloto em Configurações › Funis.": {
+    es: "Quien administra la organización elige el playbook del copiloto en Configuración › Embudos.",
+  },
+  "O playbook configurado neste funil não está disponível nesta versão.": {
+    es: "El playbook configurado en este embudo no está disponible en esta versión.",
+  },
+  "Quem administra a organização precisa escolher outro playbook em Configurações › Funis.": {
+    es: "Quien administra la organización debe elegir otro playbook en Configuración › Embudos.",
+  },
+  "A etapa atual do funil ainda não foi mapeada para o copiloto.": { es: "La etapa actual del embudo aún no fue mapeada para el copiloto." },
+  "Quem administra a organização faz o mapeamento em Configurações › Funis.": {
+    es: "Quien administra la organización hace el mapeo en Configuración › Embudos.",
+  },
+  "Oportunidade ganha.": { es: "Oportunidad ganada." },
+  "O copiloto comercial não sugere próxima etapa para uma oportunidade fechada.": {
+    es: "El copiloto comercial no sugiere próxima etapa para una oportunidad cerrada.",
+  },
+  "Oportunidade perdida.": { es: "Oportunidad perdida." },
+  "O copiloto comercial não sugere próxima etapa para uma oportunidade encerrada.": {
+    es: "El copiloto comercial no sugiere próxima etapa para una oportunidad finalizada.",
+  },
+  "Oportunidade": { es: "Oportunidad" },
+  "Esta etapa acontece fora do WhatsApp.": { es: "Esta etapa ocurre fuera de WhatsApp." },
+  "Reunião, apresentação e fechamento não têm mensagem do playbook. O copiloto volta a sugerir quando a conversa retomar.": {
+    es: "Reunión, presentación y cierre no tienen mensaje del playbook. El copiloto vuelve a sugerir cuando la conversación se retome.",
+  },
+  "Momento comercial": { es: "Momento comercial" },
+  "Etapa atual": { es: "Etapa actual" },
+  "Objetivo": { es: "Objetivo" },
+  "Perfil do interlocutor": { es: "Perfil del interlocutor" },
+  "Playbook": { es: "Playbook" },
+  "A posição no playbook foi ajustada à etapa atual do funil.": { es: "La posición en el playbook se ajustó a la etapa actual del embudo." },
+  "Conversa em andamento": { es: "Conversación en curso" },
+  "Pré-venda por telefone": { es: "Preventa por teléfono" },
   "Playbook do Copiloto": { es: "Playbook del Copiloto" },
   "Qual roteiro comercial o copiloto usa neste funil. Sem escolha, o painel não aparece na caixa de entrada.": {
     es: "Qué guion comercial usa el copiloto en este embudo. Sin elección, el panel no aparece en la bandeja de entrada.",

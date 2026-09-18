@@ -3,8 +3,15 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
+
+/** A terceira coluna tem abas; a ficha do contato é a aba «Contato». */
+async function abrirAbaContato(page: Page): Promise<void> {
+  const aba = page.getByTestId("aba-contato").first();
+  await aba.waitFor({ state: "visible" });
+  if ((await aba.getAttribute("aria-selected")) !== "true") await aba.click();
+}
 
 const credentials = credenciaisSupabaseDeTeste();
 const db = createClient(credentials.url, credentials.serviceRole, {
@@ -138,6 +145,9 @@ test("fechar canal preserva demanda, desfecho explícito e nova entrada volta à
     await page.getByRole("button", { name: /entrar/i }).click();
     await page.waitForURL(/\/app(?:\/|$)/);
     await page.goto(`/app/inbox/${conversation}`);
+    // A ficha do contato vive na aba «Contato» da terceira coluna; a aba
+    // padrão é o Copiloto, e ela reinicia a cada navegação.
+    await abrirAbaContato(page);
     const panel = page.getByTestId("inbox-demandas");
     await expect(panel.getByText("Demanda vigente neste canal")).toBeVisible();
     await expect(page.getByTestId("inbox-memoria")).toContainText("Preferência de horário");
@@ -173,6 +183,7 @@ test("fechar canal preserva demanda, desfecho explícito e nova entrada volta à
     await expect(panel.getByText("Demanda vigente neste canal")).toBeVisible();
     await page.goto("/app/inbox?filter=unassigned");
     await page.getByText("Voltei para novo atendimento", { exact: true }).first().click();
+    await abrirAbaContato(page);
     await expect(
       page.getByTestId("inbox-demandas").getByText("Demanda vigente neste canal"),
     ).toBeVisible();
@@ -220,10 +231,12 @@ test("fechar canal preserva demanda, desfecho explícito e nova entrada volta à
     await expect(page.getByTestId("inbox-item")).toContainText("Resposta registrada; atendimento mudou");
     await page.screenshot({ path: `${evidence}/task4-caso-obsoleto-aviso.png`, fullPage: true });
     await page.goto(`/app/inbox/${conversation}`);
+    await abrirAbaContato(page);
     await expect(page.getByTestId("inbox-memoria")).toContainText("Histórico encerrado");
     const language = await db.auth.admin.updateUserById(user, { user_metadata: { locale: "es" } });
     if (language.error) throw language.error;
     await page.reload();
+    await abrirAbaContato(page);
     await expect(page.getByTestId("inbox-memoria")).toContainText("Historial cerrado — sin tareas pendientes");
     await expect(page.getByTestId("inbox-memoria")).toContainText("Resuelta");
     await page.screenshot({ path: `${evidence}/task4-historico-es.png`, fullPage: true });

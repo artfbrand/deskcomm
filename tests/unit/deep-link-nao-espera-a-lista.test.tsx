@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -151,6 +152,11 @@ describe("deep-link para conversa fora do filtro", () => {
 
   it("entrega a conversa ao painel do contato com a lista ainda no ar", async () => {
     montar();
+    // A ficha do contato vive na aba «Contato» da terceira coluna (a padrão é
+    // o Copiloto). O que se mede continua o mesmo: a conversa chega ao painel
+    // enquanto a lista ainda não respondeu.
+    const aba = await screen.findByTestId("aba-contato");
+    await userEvent.click(aba);
     await waitFor(() => expect(screen.getByTestId("painel")).toHaveTextContent(CONVERSA));
   });
 });
