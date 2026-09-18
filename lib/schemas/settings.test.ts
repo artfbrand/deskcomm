@@ -149,4 +149,61 @@ describe("pipelineConfigPatchSchema", () => {
     });
     expect(r.success).toBe(true);
   });
+
+  /**
+   * MÓDULOS POR FUNIL — o que o gate do inbox vai ler.
+   *
+   * A leitura é `=== true` sem validar forma, então a ÚNICA barreira contra
+   * `"true"` (string) e `enable` (erro de digitação) é este schema. Se ele
+   * afrouxar, o interruptor da tela parece salvar e o inbox segue desligado —
+   * a falha-em-verde que o produto self-host não pode ter.
+   */
+  describe("modulos", () => {
+    it("aceita enabled true e false", () => {
+      for (const enabled of [true, false]) {
+        const r = pipelineConfigPatchSchema.safeParse({
+          modulos: { copiloto_comercial: { enabled } },
+        });
+        expect(r.success).toBe(true);
+        if (r.success) expect(r.data.modulos?.copiloto_comercial?.enabled).toBe(enabled);
+      }
+    });
+
+    it('rejeita enabled "true" como string', () => {
+      const r = pipelineConfigPatchSchema.safeParse({
+        modulos: { copiloto_comercial: { enabled: "true" } },
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it("rejeita `enable` no lugar de `enabled` (strict)", () => {
+      const r = pipelineConfigPatchSchema.safeParse({
+        modulos: { copiloto_comercial: { enable: true } },
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it("rejeita módulo desconhecido (strict no nível de modulos)", () => {
+      const r = pipelineConfigPatchSchema.safeParse({
+        modulos: { modulo_que_nao_existe: { enabled: true } },
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it("rejeita modulos como array", () => {
+      const r = pipelineConfigPatchSchema.safeParse({ modulos: [] });
+      expect(r.success).toBe(false);
+    });
+
+    it("patch sem modulos continua válido e não inventa a chave", () => {
+      const r = pipelineConfigPatchSchema.safeParse({ lost_reasons: ["Preço"] });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.modulos).toBeUndefined();
+    });
+
+    it("modulos vazio é válido (não altera nenhum módulo)", () => {
+      const r = pipelineConfigPatchSchema.safeParse({ modulos: {} });
+      expect(r.success).toBe(true);
+    });
+  });
 });

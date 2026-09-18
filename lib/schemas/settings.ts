@@ -157,6 +157,34 @@ export const customFieldSchema = z.object({
 });
 export type CustomFieldDef = z.infer<typeof customFieldSchema>;
 
+/**
+ * Módulos ligados por FUNIL, não por organização — `crm_pipelines.settings.modulos`.
+ *
+ * Um módulo é um objeto com `enabled` e, no futuro, as chaves dele. A chave do
+ * módulo é genérica de propósito: o core sabe que existe um "copiloto comercial"
+ * ligável por funil; QUEM preenche esse copiloto (playbook, textos, regras) mora
+ * fora daqui. Assim um fork atualiza o core sem carregar nome de cliente.
+ *
+ * `.strict()` nos dois níveis novos e não no topo: `enabled: "true"` (string)
+ * ou `enable: true` (erro de digitação) têm de falhar em validação, não entrar
+ * no jsonb e virar "desligado sem explicação" na leitura — que é `=== true`
+ * (ver `lib/pipelines/modulos.ts`). O topo segue frouxo para não quebrar
+ * cliente antigo que mande chave a mais.
+ *
+ * Cada módulo é `.optional()` porque o patch é PARCIAL: mandar
+ * `{ modulos: { copiloto_comercial: {...} } }` não significa "apague os outros
+ * módulos" — quem garante isso é `mergeModulos`, não o schema.
+ */
+export const moduloDeFunilSchema = z.object({ enabled: z.boolean() }).strict();
+export type ModuloDeFunil = z.infer<typeof moduloDeFunilSchema>;
+
+export const modulosDeFunilSchema = z
+  .object({
+    copiloto_comercial: moduloDeFunilSchema.optional(),
+  })
+  .strict();
+export type ModulosDeFunil = z.infer<typeof modulosDeFunilSchema>;
+
 export const pipelineConfigPatchSchema = z.object({
   vocabulary: z
     .object({
@@ -168,6 +196,7 @@ export const pipelineConfigPatchSchema = z.object({
     .optional(),
   fields: z.array(customFieldSchema).max(50).optional(),
   lost_reasons: z.array(z.string().min(1).max(80)).max(50).optional(),
+  modulos: modulosDeFunilSchema.optional(),
 });
 export type PipelineConfigPatch = z.infer<typeof pipelineConfigPatchSchema>;
 

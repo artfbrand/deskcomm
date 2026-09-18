@@ -4083,6 +4083,10 @@ export const DICIONARIO: Traducoes = {
   "Motivos de perda (separados por vírgula)": { es: "Motivos de pérdida (separados por coma)" },
   "Ex:": { es: "Ej:" },
   "Salvar vocabulário e campos": { es: "Guardar vocabulario y campos" },
+  "Copiloto comercial": { es: "Copiloto comercial" },
+  "Exibe o copiloto comercial na caixa de entrada para leads deste funil.": {
+    es: "Muestra el copiloto comercial en la bandeja de entrada para los leads de este embudo.",
+  },
   "As etapas que serviriam para este passo já estão sendo usadas por outros passos. Libere uma delas para poder escolhê-la aqui.": {
     es: "Las etapas que servirían para este paso ya están siendo usadas por otros pasos. Libera una de ellas para poder elegirla aquí.",
   },

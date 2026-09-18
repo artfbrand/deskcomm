@@ -15,9 +15,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { updatePipelineConfig } from "@/app/actions/settings/updatePipelineConfig";
 import type { PipelineConfigPatch } from "@/lib/schemas/settings";
 import { camposDoFunil } from "@/lib/leads/campos-do-funil";
+import { moduloDeFunilAtivo } from "@/lib/pipelines/modulos";
 import { customFieldSchema, type CustomFieldDef } from "@/lib/schemas/settings";
 import { Plus, Trash } from "@/lib/ui/icons";
 import { AgentMappingSection, ancoraDoMapeamento } from "./_mapping";
@@ -92,6 +94,11 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
   const [lost, setLost] = useState(v.lost ?? "Perdido");
   const [reasonsText, setReasonsText] = useState(readLostReasons(pipeline.settings).join(", "));
   const [fields, setFields] = useState<CustomFieldDef[]>(camposDoFunil(pipeline.settings));
+  // Pela chave do módulo, nunca pelo nome/slug do funil: é a configuração que
+  // liga, e o mesmo interruptor serve para qualquer funil desta organização.
+  const [copilotoComercial, setCopilotoComercial] = useState(
+    moduloDeFunilAtivo(pipeline.settings, "copiloto_comercial"),
+  );
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
@@ -113,6 +120,9 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
       vocabulary: { lead, deal, won, lost },
       fields: ok,
       lost_reasons: reasons,
+      // Só este módulo vai no patch; os demais (quando existirem) a action
+      // preserva — é `mergeModulos` quem garante, não este objeto.
+      modulos: { copiloto_comercial: { enabled: copilotoComercial } },
     };
     startTransition(async () => {
       const r = await updatePipelineConfig(pipeline.id, patch);
@@ -134,7 +144,7 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
   ];
 
   return (
-    <div className="space-y-4 border-t border-border pt-6">
+    <div className="space-y-4 border-t border-border pt-6" data-testid={`funil-config-${pipeline.id}`}>
       <h3 className="text-sm font-semibold">{t("Vocabulário e campos")}</h3>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -251,6 +261,24 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
             <Plus size={14} aria-hidden className="mr-1" /> {t("Adicionar campo")}
           </Button>
         )}
+      </div>
+
+      <div className="flex items-start gap-3 rounded-md border border-border p-3">
+        <Switch
+          id={`copiloto-comercial-${pipeline.id}`}
+          data-testid="copiloto-comercial-liga"
+          checked={copilotoComercial}
+          onCheckedChange={setCopilotoComercial}
+          disabled={isPending}
+        />
+        <div className="space-y-0.5">
+          <Label htmlFor={`copiloto-comercial-${pipeline.id}`} className="text-xs">
+            {t("Copiloto comercial")}
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            {t("Exibe o copiloto comercial na caixa de entrada para leads deste funil.")}
+          </p>
+        </div>
       </div>
 
       <div className="flex sm:justify-end">
