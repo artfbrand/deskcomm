@@ -150,6 +150,23 @@ test.describe("followup flows — lista + criação (Task 6.1)", () => {
  * `steps` on the 2nd move gives React Flow's connection-line drag enough
  * intermediate pointermove events to register the gesture reliably.
  */
+/**
+ * Fecha todo toast aberto pelo botão acessível do próprio toast (o <Toaster>
+ * do app tem `closeButton`), e só volta quando não há mais nenhum. O botão
+ * de fechar aparece ao passar o mouse; por isso o `hover` antes do clique.
+ */
+async function fecharToasts(page: Page): Promise<void> {
+  const toasts = page.locator("[data-sonner-toast]");
+  for (let i = 0; i < 10 && (await toasts.count()) > 0; i++) {
+    const toast = toasts.first();
+    await toast.hover();
+    await toast.locator("[data-close-button]").click();
+    // Sai da área dos toasts para não pausar o relógio dos que restarem.
+    await page.mouse.move(5, 5);
+  }
+  await expect(toasts).toHaveCount(0);
+}
+
 async function connectHandles(
   page: Page,
   sourceNodeId: string,
@@ -397,7 +414,8 @@ test.describe("followup flow builder — canvas visual (Task 6.2)", () => {
 
     // 4. Publish INCOMPLETE — expect 422 anchored to the offending nodes.
     await page.getByTestId("publish-button").click();
-    await expect(page.getByText(/reprovado na validação/i)).toBeVisible();
+    const toast422 = page.locator("[data-sonner-toast]").filter({ hasText: /reprovado na validação/i });
+    await expect(toast422).toBeVisible();
     await expect(page.locator(`[data-testid="node-error-${waitId}"]`)).toBeVisible();
     await expect(page.locator(`[data-testid="node-error-${actionId}"]`)).toBeVisible();
     await expect(page.locator(`[data-testid="node-error-${endId}"]`)).toBeVisible();
@@ -405,12 +423,24 @@ test.describe("followup flow builder — canvas visual (Task 6.2)", () => {
       path: "test-results/followup-6.2-06-publish-422-anchored.png",
       fullPage: true,
     });
+    // Publicar SALVA o rascunho antes, então aqui há DOIS toasts abertos
+    // («Rascunho salvo.» e o erro 422), no canto superior direito — em cima
+    // do botão «Publicar». Eles somem sozinhos em 4 s, MAS o Sonner pausa o
+    // relógio com o mouse em cima; o drag de `connectHandles` abaixo deixa o
+    // mouse parado no nó de destino, que pode cair sob os toasts. Fechar pelo
+    // botão acessível de cada toast (`closeButton` do <Toaster>) é
+    // determinístico e é o gesto que a pessoa faria.
+    await fecharToasts(page);
 
     // 5. Fix: connect action→end.
     await connectHandles(page, actionId, endId);
     await expect(page.locator(".react-flow__edge")).toHaveCount(3);
 
     // 6. Publish for real — expect success + "Ativo" badge + toast.
+    // Nenhum toast pode estar cobrindo o botão: o clique tem de CHEGAR nele.
+    // Nada de `force: true` — um clique que atravessa o toast não prova que o
+    // botão estava alcançável para quem usa a tela.
+    await fecharToasts(page);
     await page.getByTestId("publish-button").click();
     await expect(page.getByText("Fluxo publicado.")).toBeVisible();
     await expect(page.locator('[aria-label="status: Ativo"]')).toBeVisible();
