@@ -16,14 +16,12 @@
  * JSON em snake_case, como toda resposta de `/api/v1/` (CLAUDE.md).
  */
 import { lerConfiguracaoDoCopiloto, papelDaEtapaDoFunil, posicaoNoPlaybook } from "@/lib/afb/playbook/mapeamento";
-import type { EtapaId } from "@/lib/afb/playbook/etapas";
-import type { PapelId } from "@/lib/afb/playbook/papeis";
 import { estadoDoCopiloto } from "@/lib/afb/gate";
 import { etapaDoPlaybookComercial } from "@/lib/afb/playbooks/registry";
 import { resolveActiveLeadForContact, type LeadCandidate } from "@/lib/leads/active-lead";
-import type { LeadStatus } from "@/lib/types/leads";
 
-import { lerCamposDoLead, type CamposDoLead } from "./campos";
+import { lerCamposDoLead } from "./campos";
+import type { BaseDoContexto as Base, ColunaNoContexto, ContextoDoCopiloto, LeadNoContexto } from "./contrato";
 
 // ─── Entrada (o que o carregador lê) ─────────────────────────────────────────
 
@@ -56,67 +54,19 @@ export interface ColunaMinima {
 }
 
 // ─── Saída (o contrato da rota) ──────────────────────────────────────────────
+//
+// Os tipos da resposta moram em `contrato.ts` — módulo só de tipos, que o hook
+// do inbox pode importar sem puxar este resolvedor (registry, gate, lead ativo)
+// para o bundle do navegador. Reexportados aqui para quem já tem este módulo.
 
-export interface LeadNoContexto {
-  id: string;
-  title: string;
-  pipeline_id: string;
-  stage_id: string;
-  status: LeadStatus;
-  updated_at: string;
-}
-
-export interface ColunaNoContexto {
-  id: string;
-  name: string;
-  /** `null` quando a coluna não está no mapa do copiloto. */
-  role: PapelId | null;
-}
-
-interface Base {
-  conversation_id: string;
-  contact_id: string | null;
-  warnings: string[];
-}
-
-export type ContextoDoCopiloto =
-  | ({ status: "no_contact" } & Base)
-  | ({ status: "no_lead" } & Base)
-  | ({ status: "ambiguous_lead"; candidate_lead_ids: string[] } & Base)
-  | ({ status: "inconsistent"; reason: "pipeline_not_found" | "stage_not_found"; lead: LeadNoContexto } & Base)
-  | ({ status: "copilot_disabled"; lead: LeadNoContexto; pipeline: { id: string } } & Base)
-  | ({ status: "no_playbook"; lead: LeadNoContexto; pipeline: { id: string } } & Base)
-  | ({ status: "unknown_playbook"; lead: LeadNoContexto; pipeline: { id: string; playbook_id: string } } & Base)
-  | ({ status: "terminal_won"; lead: LeadNoContexto; pipeline: { id: string; playbook_id: string }; stage: ColunaNoContexto } & Base)
-  | ({ status: "terminal_lost"; lead: LeadNoContexto; pipeline: { id: string; playbook_id: string }; stage: ColunaNoContexto } & Base)
-  | ({ status: "unmapped_stage"; lead: LeadNoContexto; pipeline: { id: string; playbook_id: string }; stage: ColunaNoContexto } & Base)
-  | ({
-      /** A coluna tem papel, mas o papel não tem etapa de WhatsApp (apresentação, fechamento, pós-venda). */
-      status: "out_of_playbook";
-      lead: LeadNoContexto;
-      pipeline: { id: string; playbook_id: string };
-      stage: ColunaNoContexto & { role: PapelId };
-      fields: CamposDoLead;
-    } & Base)
-  | ({
-      status: "active";
-      lead: LeadNoContexto;
-      pipeline: { id: string; playbook_id: string };
-      stage: ColunaNoContexto & { role: PapelId };
-      playbook: {
-        id: string;
-        /** A etapa do playbook em que a conversa está — um `EtapaId` do motor. */
-        stage_id: EtapaId;
-        title: string;
-        objective: string;
-        /** De onde saiu a posição: do campo do lead, do início da coluna, ou ajustada. */
-        position_origin: "gravada" | "inicial" | "ajustada";
-        allowed_stage_ids: readonly EtapaId[];
-      };
-      fields: CamposDoLead;
-    } & Base);
-
-export type StatusDoContexto = ContextoDoCopiloto["status"];
+export type {
+  BaseDoContexto,
+  ColunaNoContexto,
+  ContextoDoCopiloto,
+  EtapaDoPlaybookNoContexto,
+  LeadNoContexto,
+  StatusDoContexto,
+} from "./contrato";
 
 // ─── Passo 1: qual lead ──────────────────────────────────────────────────────
 
