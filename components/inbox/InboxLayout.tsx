@@ -20,7 +20,8 @@ import { ChatThread } from "./ChatThread";
 import { Composer, type ComposerHandle } from "./Composer";
 import { ConversationHeader } from "./ConversationHeader";
 import { RetentionNotice } from "./RetentionNotice";
-import { CRMSidePanel } from "./CRMSidePanel";
+import { PainelLateralDoInbox } from "@/components/afb/copiloto-comercial/PainelLateralDoInbox";
+import { useCopilotoContexto } from "@/hooks/afb/useCopilotoContexto";
 import type { Message as ConversationMensagem } from "@/lib/types/messaging";
 import { InboxKeyboardShortcuts } from "./InboxKeyboardShortcuts";
 
@@ -168,6 +169,12 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
    */
   const { data: automaticoDaOrg } = useAutomaticoAtivo();
   const composerRef = useRef<ComposerHandle | null>(null);
+
+  // O contexto do copiloto para a conversa selecionada — buscado AQUI, uma
+  // vez, e passado às duas instâncias do painel lateral (coluna do desktop e
+  // ficha do celular). A chave carrega `selectedId`, então trocar de conversa
+  // troca a query; sem conversa, fica desligado.
+  const contextoDoCopiloto = useCopilotoContexto(selectedId);
 
   const filters: ConversationsFilters = useMemo(
     () => ({
@@ -459,7 +466,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
                 </SheetTrigger>
                 <SheetContent side="right" className="w-[min(22rem,90vw)] overflow-y-auto p-0">
                   <SheetTitle className="sr-only">{t("Ficha do contato")}</SheetTitle>
-                  <CRMSidePanel conversation={selectedConversation} />
+                  <PainelLateralDoInbox conversation={selectedConversation} contexto={contextoDoCopiloto} />
                 </SheetContent>
               </Sheet>
             )}
@@ -505,7 +512,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
       </div>
 
       <div className="hidden h-full min-h-0 xl:block">
-        <CRMSidePanel conversation={selectedConversation} />
+        <PainelLateralDoInbox conversation={selectedConversation} contexto={contextoDoCopiloto} />
       </div>
 
       <InboxKeyboardShortcuts

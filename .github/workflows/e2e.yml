@@ -582,6 +582,7 @@ jobs:
         olhar-telas-do-epico.spec.ts
         pipelines-gestao.spec.ts
         copiloto-comercial-por-funil.spec.ts
+        copiloto-comercial-inbox.spec.ts
         qa-agente-usa-as-maos.spec.ts
         qa-selo-no-funil-usado.spec.ts
         qa-telas-descobertas-w4.spec.ts

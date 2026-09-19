@@ -150,6 +150,27 @@ test.describe("followup flows — lista + criação (Task 6.1)", () => {
  * `steps` on the 2nd move gives React Flow's connection-line drag enough
  * intermediate pointermove events to register the gesture reliably.
  */
+/**
+ * Espera todo toast sumir SOZINHO, sem tocar em nenhum.
+ *
+ * Os toasts do app duram 4 s (`duration={4000}` no <Toaster>) e o Sonner
+ * pausa esse relógio enquanto o mouse está sobre eles — por isso o primeiro
+ * gesto é tirar o mouse do canto superior direito, onde eles nascem. A
+ * versão anterior clicava no botão de fechar de cada um, e corria contra a
+ * animação de saída: um toast já com `data-removed="true"` some do DOM no
+ * meio do `hover`, e o Playwright estoura por "element was detached". Não
+ * interagir com o que está saindo elimina a corrida: só se observa o DOM até
+ * ficar sem toast.
+ *
+ * O teto de 6 s é os 4 s de vida + folga para a animação de saída e para o
+ * relógio ter sido pausado por um instante antes do mouse sair. Mais que isso
+ * é defeito de verdade (toast que não sai), e aí o teste tem de falhar.
+ */
+async function aguardarToastsSumirem(page: Page): Promise<void> {
+  await page.mouse.move(5, 5);
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0, { timeout: 6_000 });
+}
+
 async function connectHandles(
   page: Page,
   sourceNodeId: string,
@@ -397,7 +418,8 @@ test.describe("followup flow builder — canvas visual (Task 6.2)", () => {
 
     // 4. Publish INCOMPLETE — expect 422 anchored to the offending nodes.
     await page.getByTestId("publish-button").click();
-    await expect(page.getByText(/reprovado na validação/i)).toBeVisible();
+    const toast422 = page.locator("[data-sonner-toast]").filter({ hasText: /reprovado na validação/i });
+    await expect(toast422).toBeVisible();
     await expect(page.locator(`[data-testid="node-error-${waitId}"]`)).toBeVisible();
     await expect(page.locator(`[data-testid="node-error-${actionId}"]`)).toBeVisible();
     await expect(page.locator(`[data-testid="node-error-${endId}"]`)).toBeVisible();
@@ -405,12 +427,23 @@ test.describe("followup flow builder — canvas visual (Task 6.2)", () => {
       path: "test-results/followup-6.2-06-publish-422-anchored.png",
       fullPage: true,
     });
+    // Publicar SALVA o rascunho antes, então aqui há DOIS toasts abertos
+    // («Rascunho salvo.» e o erro 422), no canto superior direito — em cima
+    // do botão «Publicar». Eles somem sozinhos em 4 s, MAS o Sonner pausa o
+    // relógio com o mouse em cima; o drag de `connectHandles` abaixo deixaria
+    // o mouse parado no nó de destino, que pode cair sob os toasts. Tira-se o
+    // mouse e espera-se os toasts sumirem por conta própria — sem tocar neles.
+    await aguardarToastsSumirem(page);
 
     // 5. Fix: connect action→end.
     await connectHandles(page, actionId, endId);
     await expect(page.locator(".react-flow__edge")).toHaveCount(3);
 
     // 6. Publish for real — expect success + "Ativo" badge + toast.
+    // Nenhum toast pode estar cobrindo o botão: o clique tem de CHEGAR nele.
+    // Nada de `force: true` — um clique que atravessa o toast não prova que o
+    // botão estava alcançável para quem usa a tela.
+    await aguardarToastsSumirem(page);
     await page.getByTestId("publish-button").click();
     await expect(page.getByText("Fluxo publicado.")).toBeVisible();
     await expect(page.locator('[aria-label="status: Ativo"]')).toBeVisible();
