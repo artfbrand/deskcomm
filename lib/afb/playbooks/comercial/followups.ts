@@ -1,8 +1,10 @@
 /**
  * afb_comercial_v1 — Etapa 8: a cadência de follow-up, ciclo de 15 dias.
  *
- * ⚠️ ESTA É A CADÊNCIA OFICIAL (v6): D0 · D1 · D3 · D5 · D8 · D12 · D15, com
- * TRÊS follow-ups. Não confundir com a versão anterior codificada em
+ * ⚠️ DIAS DA V6, com decisão de canal posterior: D0 · D1 · D3 · D5 · D8 · D12
+ * · D15. D12 e os demais toques escritos desta fase são WhatsApp; e-mail fica
+ * para uma fase futura. O HTML da v6 permanece histórico e não é reescrito.
+ * Não confundir com a versão anterior codificada em
  * `lib/afb/playbook/cadencia.ts` (D6/D9/D16/D20, quatro follow-ups) — aquela
  * está em conflito com este documento e é sinalizada, não alterada aqui.
  */
@@ -38,7 +40,7 @@ export const CADENCIA: Cadencia = {
       id: "followup.d0.abordagem",
       dia: 0,
       rotulo: "Abordagem inicial",
-      canal: "whatsapp_e_email",
+      canal: "whatsapp",
       tema: "Etapa 1",
       remeteA: "whatsapp.abertura",
     },
@@ -55,7 +57,7 @@ export const CADENCIA: Cadencia = {
       id: "followup.d3.demanda_contratada",
       dia: 3,
       rotulo: "Follow-up 1",
-      canal: "whatsapp_e_email",
+      canal: "whatsapp",
       tema: "Demanda contratada",
       anexo: "case_png",
       mensagem: {
@@ -86,7 +88,7 @@ Se você me enviar uma fatura, eu consigo verificar esse ponto para você.
       id: "followup.d8.energia_reativa",
       dia: 8,
       rotulo: "Follow-up 2",
-      canal: "whatsapp_e_email",
+      canal: "whatsapp",
       tema: "Energia reativa",
       anexo: "case_png",
       mensagem: {
@@ -106,12 +108,12 @@ Você sabe se esse custo aparece hoje na fatura?
       id: "followup.d12.contratacao_livre",
       dia: 12,
       rotulo: "Follow-up 3",
-      canal: "email",
+      canal: "whatsapp",
       tema: "Ambiente de Contratação Livre",
       anexo: "case_png",
       mensagem: {
         id: "followup.d12.contratacao_livre.mensagem",
-        canal: "email",
+        canal: "whatsapp",
         texto: `Outro ponto que analisamos: o preço da energia também pode representar uma oportunidade de economia.
 
 Para empresas elegíveis, essa parcela pode ser contratada no Mercado Livre de Energia, permitindo comparar condições entre diferentes comercializadoras e com isso contratar a energia mais barata.
@@ -126,7 +128,7 @@ A distribuidora continua responsável pela rede, manutenção e atendimento. O q
       id: "followup.d15.encerramento",
       dia: 15,
       rotulo: "Encerramento",
-      canal: "whatsapp_e_email",
+      canal: "whatsapp",
       tema: "Despedida",
       mensagem: {
         id: "followup.d15.encerramento.mensagem",

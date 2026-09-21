@@ -176,13 +176,13 @@ describe("cadência de follow-up (v6, 15 dias)", () => {
 
   it("rótulos, canais e temas como na tabela", () => {
     expect(P.followup.toques.map((t) => [t.rotulo, t.canal, t.tema])).toEqual([
-      ["Abordagem inicial", "whatsapp_e_email", "Etapa 1"],
+      ["Abordagem inicial", "whatsapp", "Etapa 1"],
       ["Ligação 1", "telefone", "Roteiro de ligação, período da manhã"],
-      ["Follow-up 1", "whatsapp_e_email", "Demanda contratada"],
+      ["Follow-up 1", "whatsapp", "Demanda contratada"],
       ["Ligação 2", "telefone", "Roteiro de ligação, período da tarde"],
-      ["Follow-up 2", "whatsapp_e_email", "Energia reativa"],
-      ["Follow-up 3", "email", "Ambiente de Contratação Livre"],
-      ["Encerramento", "whatsapp_e_email", "Despedida"],
+      ["Follow-up 2", "whatsapp", "Energia reativa"],
+      ["Follow-up 3", "whatsapp", "Ambiente de Contratação Livre"],
+      ["Encerramento", "whatsapp", "Despedida"],
     ]);
   });
 

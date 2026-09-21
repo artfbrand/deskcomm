@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AFB Comercial Outbound — bootstrap assistido",
+    "subtitle": "configuração tenant-aware, aprovação humana e trilha nativa sem efeitos comerciais no momento da sugestão",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "entrada", "label": "Seleção explícita" },
+    { "id": "config", "label": "Configuração nativa" },
+    { "id": "runtime", "label": "Execução assistida" },
+    { "id": "evidencia", "label": "Evidência e observabilidade" }
+  ],
+  "mainPath": ["cli", "org", "agent", "draft", "human", "event"],
+  "nodes": [
+    { "id": "cli", "lane": "entrada", "label": "scripts/afb/provisionar", "type": "service" },
+    { "id": "org", "lane": "entrada", "label": "organizations", "type": "table" },
+    {
+      "id": "documents",
+      "lane": "config",
+      "label": "Markdown AFB + SHA-256",
+      "type": "config"
+    },
+    { "id": "pipeline", "lane": "config", "label": "crm_pipelines.settings", "type": "table" },
+    {
+      "id": "credential",
+      "lane": "config",
+      "label": "credencial OpenAI validada",
+      "type": "config"
+    },
+    { "id": "catalog", "lane": "config", "label": "ai_models", "type": "table" },
+    { "id": "knowledge", "lane": "config", "label": "conhecimento RAG", "type": "table" },
+    { "id": "memory", "lane": "config", "label": "memória organizacional", "type": "table" },
+    { "id": "agent", "lane": "runtime", "label": "agente + versão assistida", "type": "service" },
+    { "id": "draft", "lane": "runtime", "label": "ai_reply_drafts", "type": "table" },
+    { "id": "human", "lane": "runtime", "label": "revisão humana", "type": "frontend" },
+    { "id": "event", "lane": "evidencia", "label": "evento comprovado", "type": "messagebus" },
+    {
+      "id": "observability",
+      "lane": "evidencia",
+      "label": "runs · calls · audit · event_log",
+      "type": "table"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "cli", "to": "org", "label": "UUID ou slug obrigatório" },
+    { "id": "e2", "from": "org", "to": "pipeline", "label": "filtro organization_id" },
+    { "id": "e3", "from": "pipeline", "to": "agent", "label": "UUID + playbook" },
+    { "id": "e4", "from": "credential", "to": "catalog", "label": "modelos disponíveis" },
+    { "id": "e5", "from": "catalog", "to": "agent", "label": "modelo com tools" },
+    { "id": "e6", "from": "org", "to": "credential", "label": "view segura" },
+    { "id": "e7", "from": "org", "to": "knowledge", "label": "acervo tenant-aware" },
+    { "id": "e8", "from": "knowledge", "to": "agent", "label": "knowledge_source_ids" },
+    { "id": "e9", "from": "org", "to": "memory", "label": "memória tenant-aware" },
+    { "id": "e10", "from": "memory", "to": "agent", "label": "contexto adicional" },
+    { "id": "e11", "from": "agent", "to": "draft", "label": "sugestão, não envio" },
+    { "id": "e12", "from": "draft", "to": "human", "label": "aprovação obrigatória" },
+    { "id": "e13", "from": "human", "to": "event", "label": "envio real confirmado" },
+    { "id": "e14", "from": "event", "to": "observability", "label": "correlação" },
+    { "id": "e15", "from": "observability", "to": "cli", "label": "auditoria do apply" },
+    { "id": "e16", "from": "draft", "to": "observability", "label": "contexto e trace" },
+    { "id": "e17", "from": "event", "to": "pipeline", "label": "efeito futuro permitido" },
+    { "id": "e18", "from": "credential", "to": "cli", "label": "ausência vira aviso" },
+    { "id": "e19", "from": "knowledge", "to": "observability", "label": "knowledge_searches" },
+    { "id": "e20", "from": "memory", "to": "observability", "label": "gap de versão documentado" },
+    { "id": "e21", "from": "cli", "to": "documents", "label": "lê caminhos declarados" },
+    { "id": "e22", "from": "documents", "to": "knowledge", "label": "conteúdo + hash" },
+    { "id": "e23", "from": "documents", "to": "memory", "label": "princípios versionados" },
+    {
+      "id": "e24",
+      "from": "documents",
+      "to": "observability",
+      "label": "versão/hash; snapshot futuro"
+    }
+  ]
+}

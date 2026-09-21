@@ -41,7 +41,7 @@ export type { PlaybookId };
 export type Canal = "whatsapp" | "email" | "telefone";
 
 /** Como a tabela do playbook nomeia o canal de cada toque da cadência. */
-export type CanalDoToque = "whatsapp_e_email" | "telefone" | "email";
+export type CanalDoToque = "whatsapp" | "whatsapp_e_email" | "telefone" | "email";
 
 export type PeriodoDoDia = "manha" | "tarde";
 
