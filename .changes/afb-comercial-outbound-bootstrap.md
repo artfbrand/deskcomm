@@ -5,7 +5,7 @@ titulo: O piloto comercial AFB ganha um bootstrap seguro e repetível
 ---
 
 Um comando administrativo agora prepara o Copilot comercial assistido da AFB sem duplicar dados: ele
-configura o playbook no funil escolhido, seis materiais de conhecimento, a memória organizacional e,
+configura o playbook no funil escolhido, nove materiais de conhecimento, a memória organizacional e,
 quando credencial OpenAI validada, modelo e WhatsApp estão inequívocos, publica o agente nativo em modo
 assistido.
 

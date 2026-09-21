@@ -21,7 +21,7 @@ Estado: preparação do piloto. Este documento é a decisão atual; não reescre
 O bootstrap cria ou reconcilia, sem duplicar:
 
 1. o agente `AFB Comercial Outbound — Assistido`;
-2. seis materiais FAQ nativos e versionáveis;
+2. nove materiais FAQ nativos e versionáveis;
 3. a memória `AFB — Princípios comerciais e limites`;
 4. `settings.modulos.copiloto_comercial.enabled=true` e
    `playbook_id=afb_comercial_v1`, preservando `etapas` e demais propriedades;
@@ -66,13 +66,19 @@ oficiais, objeções e regras comerciais. Use conhecimento e memória apenas com
 
 Os conteúdos humanos e auditáveis são Markdown versionado no repositório:
 
-- `docs/afb/knowledge/empresa-posicionamento.md`;
-- `docs/afb/knowledge/portfolio-servicos.md`;
-- `docs/afb/knowledge/metodo-gmt.md`;
-- `docs/afb/knowledge/mercado-livre-energia-assinatura.md`;
-- `docs/afb/knowledge/objecoes-contexto.md`;
-- `docs/afb/knowledge/privacidade-consentimento.md`;
-- `docs/afb/memory/principios-comerciais-e-limites.md`.
+1. Empresa e posicionamento — `docs/afb/knowledge/empresa-posicionamento.md`;
+2. Serviços — `docs/afb/knowledge/portfolio-servicos.md`;
+3. Método GMT — `docs/afb/knowledge/metodo-gmt.md`;
+4. Mercado Livre e energia por assinatura —
+   `docs/afb/knowledge/mercado-livre-energia-assinatura.md`;
+5. Objeções comerciais — `docs/afb/knowledge/objecoes-contexto.md`;
+6. Privacidade, consentimento e opt-out — `docs/afb/knowledge/privacidade-consentimento.md`;
+7. Processo comercial outbound — `docs/afb/knowledge/processo-comercial-outbound.md`;
+8. Qualificação comercial — `docs/afb/knowledge/qualificacao-comercial.md`;
+9. Reuniões, agenda e próximos passos —
+   `docs/afb/knowledge/reunioes-agenda-proximos-passos.md`.
+
+A memória organizacional vem de `docs/afb/memory/principios-comerciais-e-limites.md`.
 
 O bootstrap lê somente esses caminhos declarados, valida título, versão, status e escopo, normaliza o
 conteúdo e calcula SHA-256. Cada conhecimento vira uma fonte `faq` nativa, com um item documental
@@ -86,8 +92,9 @@ item e solicita nova indexação; não cria outra fonte. Itens humanos não pert
 preservados. Material homônimo sem a chave de propriedade, chave duplicada ou fonte AFB arquivada é
 conflito e nunca é sobrescrito, reativado ou duplicado silenciosamente.
 
-Os seis materiais cobrem empresa e posicionamento; serviços; método GMT; Mercado Livre e energia por
-assinatura; contexto de objeções; privacidade, consentimento e opt-out. O documento de objeções aponta
+Os nove materiais cobrem empresa e posicionamento; serviços; método GMT; Mercado Livre e energia por
+assinatura; contexto de objeções; privacidade, consentimento e opt-out; processo comercial outbound;
+qualificação comercial; reuniões, agenda e próximos passos. O documento de objeções aponta
 para `lib/afb/playbooks/comercial/objecoes.ts` e `afb_comercial_v1`, sem copiar as respostas oficiais.
 O HTML completo do playbook não é copiado para o RAG e continua sendo a fonte de verdade para
 sequência, copy, objeções, cadência e regras do fluxo.
@@ -167,7 +174,7 @@ evolução.
 `ai_knowledge_versions`; `ai_knowledge_sources.active_kb_version_id` aponta para a versão ativa; e
 cada trecho registra `ai_chunks.content_hash`. Isso permite provar qual documento o bootstrap desejava
 e qual índice está ativo no momento da inspeção. Cada apply também grava no `api_audit_log` o caminho,
-a versão declarada e o SHA-256 dos seis conhecimentos e da memória, sem copiar seu conteúdo.
+a versão declarada e o SHA-256 dos nove conhecimentos e da memória, sem copiar seu conteúdo.
 
 **GAP:** `ai_knowledge_versions.sources_snapshot` não é preenchido pelo indexador atual, e a geração
 da sugestão não persiste ainda o conjunto exato de fontes, versões ativas e hashes consultados. Logo,
