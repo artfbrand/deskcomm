@@ -14,6 +14,7 @@ import { papel } from "@/lib/afb/playbook/papeis";
 
 import { etapaDoPlaybookComercial, metadadosDaEtapa, placeholdersDaMensagem, todasAsMensagens, tokensDoTexto } from "../registry";
 import { AFB_COMERCIAL_V1 as P } from "./index";
+import { ESTRUTURA_DE_RESPOSTA } from "./objecoes";
 
 const naoVazio = (s: string | undefined) => typeof s === "string" && s.trim().length > 0;
 
@@ -322,6 +323,13 @@ describe("objeções", () => {
     const o = P.objecoes.find((x) => x.id === "sem_interesse")!;
     expect(o.observacao).toMatch(/revisamos ano passado/);
     expect(o.proximaAcao).toMatch(/encerra a cadência/);
+  });
+
+  it("a estrutura de resposta (lede da biblioteca no documento) pertence ao objeto, e é a própria constante", () => {
+    expect(P.regrasDasObjecoes).toEqual([ESTRUTURA_DE_RESPOSTA]);
+    expect(ESTRUTURA_DE_RESPOSTA).toMatch(/reconhecer sem discutir/i);
+    expect(ESTRUTURA_DE_RESPOSTA).toMatch(/reenquadrar com informação/);
+    expect(ESTRUTURA_DE_RESPOSTA).toMatch(/devolver o convite/);
   });
 });
 

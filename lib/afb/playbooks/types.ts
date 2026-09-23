@@ -335,6 +335,15 @@ export interface Playbook {
   email: EmailDeAbertura;
   ligacao: RoteiroDeLigacao;
   objecoes: readonly Objecao[];
+  /**
+   * Regras TRANSVERSAIS da biblioteca de objeções — valem para qualquer
+   * objeção, seja ela qual for ("reconhecer sem discutir → reenquadrar →
+   * devolver o convite"). Não é guardrail (não proíbe nada), não é princípio
+   * (é operacional da biblioteca) e não é de uma objeção específica. Ficou
+   * fora deste objeto até a A0.1 — era uma constante solta que nenhum
+   * consumidor lia, e a definição genérica a perdia.
+   */
+  regrasDasObjecoes: readonly string[];
   guardrails: readonly Guardrail[];
   metricas: readonly Metrica[];
   /** Notas de teste controlado e afins. */

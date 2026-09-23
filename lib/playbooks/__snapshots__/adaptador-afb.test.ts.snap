@@ -1,0 +1,71 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`determinismo e hash canônico > esqueleto estável (ids, ordem, kinds, ids de mensagem) — snapshot como camada adicional 1`] = `
+[
+  {
+    "id": "abertura",
+    "kind": "sequence",
+    "messages": [
+      "whatsapp.abertura",
+    ],
+    "order": 1,
+  },
+  {
+    "id": "qualificacao",
+    "kind": "sequence",
+    "messages": [
+      "whatsapp.qualificacao",
+      "whatsapp.qualificacao.ponte_ja_acompanha",
+    ],
+    "order": 2,
+  },
+  {
+    "id": "gancho_de_valor",
+    "kind": "sequence",
+    "messages": [
+      "whatsapp.gancho_de_valor",
+    ],
+    "order": 3,
+  },
+  {
+    "id": "desarme_de_risco",
+    "kind": "sequence",
+    "messages": [
+      "whatsapp.desarme_de_risco",
+    ],
+    "order": 4,
+  },
+  {
+    "id": "micro_spin",
+    "kind": "sequence",
+    "messages": [
+      "whatsapp.micro_spin",
+    ],
+    "order": 5,
+  },
+  {
+    "id": "convite",
+    "kind": "sequence",
+    "messages": [
+      "whatsapp.convite",
+    ],
+    "order": 6,
+  },
+  {
+    "id": "pos_sim",
+    "kind": "post_yes",
+    "messages": [
+      "pos_sim.confirmacao",
+      "pos_sim.lembrete_24h",
+      "pos_sim.abertura_com_fatura",
+    ],
+    "order": 7,
+  },
+  {
+    "id": "follow_up",
+    "kind": "follow_up",
+    "messages": [],
+    "order": 8,
+  },
+]
+`;
