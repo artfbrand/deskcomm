@@ -28,13 +28,29 @@
  * Os estados de negócio (sem lead, ambíguo, desligado, sem playbook, coluna
  * sem papel, ganho/perdido…) são 200 com `status` discriminado — a tela decide
  * o que mostrar. 500 só para falha inesperada, e sem a mensagem do Postgres.
+ *
+ * ─── Shadow do playbook persistido (observação, nunca decisão) ──────────────
+ *
+ * Depois que o contexto está pronto, a rota AGENDA — para depois do envio da
+ * resposta — uma comparação entre o playbook publicado no banco e o que o
+ * registry diz. O registry continua sendo a autoridade operacional: o shadow
+ * lê, compara, registra no log e o valor é descartado. Ele não entra no
+ * contrato HTTP, não troca copy, não muda etapa e não escreve em lugar nenhum.
+ *
+ * Duas propriedades sustentam isso, e nenhuma delas é promessa de comentário:
+ * o trabalho roda via `after()` (portanto depois do flush da resposta, sem
+ * custo de latência para quem está no inbox), e o agendamento é envolvido num
+ * `catch` que registra e segue — de modo que nem uma falha do próprio
+ * agendamento transforma um 200 funcional em 500.
  */
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
 import { carregarContextoDoCopiloto } from "@/lib/afb/copiloto/carregar";
+import { observarPlaybookDoCopilotoAFB, playbookIdDoContexto } from "@/lib/afb/copiloto/shadow-afb";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
+import { agendarPosResposta } from "@/lib/http/pos-resposta";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { logger } from "@/lib/logger";
 import { createClient } from "@/lib/supabase/server";
@@ -64,5 +80,30 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
     logger.error("afb.copiloto.contexto_falhou", { requestId, conversationId, mensagem: resultado.mensagem });
     return fail("internal_error", t("Não foi possível montar o contexto do copiloto."), 500, { requestId });
   }
+
+  // OBSERVAÇÃO, depois da resposta. O contexto acima já está pronto e é a
+  // única resposta operacional: o registry decidiu tudo, e nada daqui para
+  // baixo o altera. `agendarPosResposta` pode lançar de propósito (erro
+  // inesperado do `after()` não é engolido pelo helper genérico) — a barreira
+  // operacional é ESTE `catch`, e não uma concessão lá dentro.
+  try {
+    agendarPosResposta("afb.copiloto.shadow", async () => {
+      await observarPlaybookDoCopilotoAFB({
+        client: supabase,
+        organizationId: authz.org.orgId,
+        playbookId: playbookIdDoContexto(resultado.contexto),
+      });
+    });
+  } catch (e) {
+    // Sanitizado: id do pedido, organização, nome do evento e o erro. Nada de
+    // conversa, contato, lead ou conteúdo — este log nasce de uma falha de
+    // agendamento, não de um atendimento.
+    logger.error("afb.copiloto.shadow_nao_agendado", {
+      requestId,
+      organizationId: authz.org.orgId,
+      erro: e instanceof Error ? e.message : String(e),
+    });
+  }
+
   return ok(resultado.contexto, { requestId });
 }
