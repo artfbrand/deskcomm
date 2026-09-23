@@ -14,6 +14,7 @@ import { papel } from "@/lib/afb/playbook/papeis";
 
 import { etapaDoPlaybookComercial, metadadosDaEtapa, placeholdersDaMensagem, todasAsMensagens, tokensDoTexto } from "../registry";
 import { AFB_COMERCIAL_V1 as P } from "./index";
+import { ESTRUTURA_DE_RESPOSTA } from "./objecoes";
 
 const naoVazio = (s: string | undefined) => typeof s === "string" && s.trim().length > 0;
 
@@ -176,13 +177,13 @@ describe("cadência de follow-up (v6, 15 dias)", () => {
 
   it("rótulos, canais e temas como na tabela", () => {
     expect(P.followup.toques.map((t) => [t.rotulo, t.canal, t.tema])).toEqual([
-      ["Abordagem inicial", "whatsapp_e_email", "Etapa 1"],
+      ["Abordagem inicial", "whatsapp", "Etapa 1"],
       ["Ligação 1", "telefone", "Roteiro de ligação, período da manhã"],
-      ["Follow-up 1", "whatsapp_e_email", "Demanda contratada"],
+      ["Follow-up 1", "whatsapp", "Demanda contratada"],
       ["Ligação 2", "telefone", "Roteiro de ligação, período da tarde"],
-      ["Follow-up 2", "whatsapp_e_email", "Energia reativa"],
-      ["Follow-up 3", "email", "Ambiente de Contratação Livre"],
-      ["Encerramento", "whatsapp_e_email", "Despedida"],
+      ["Follow-up 2", "whatsapp", "Energia reativa"],
+      ["Follow-up 3", "whatsapp", "Ambiente de Contratação Livre"],
+      ["Encerramento", "whatsapp", "Despedida"],
     ]);
   });
 
@@ -322,6 +323,13 @@ describe("objeções", () => {
     const o = P.objecoes.find((x) => x.id === "sem_interesse")!;
     expect(o.observacao).toMatch(/revisamos ano passado/);
     expect(o.proximaAcao).toMatch(/encerra a cadência/);
+  });
+
+  it("a estrutura de resposta (lede da biblioteca no documento) pertence ao objeto, e é a própria constante", () => {
+    expect(P.regrasDasObjecoes).toEqual([ESTRUTURA_DE_RESPOSTA]);
+    expect(ESTRUTURA_DE_RESPOSTA).toMatch(/reconhecer sem discutir/i);
+    expect(ESTRUTURA_DE_RESPOSTA).toMatch(/reenquadrar com informação/);
+    expect(ESTRUTURA_DE_RESPOSTA).toMatch(/devolver o convite/);
   });
 });
 

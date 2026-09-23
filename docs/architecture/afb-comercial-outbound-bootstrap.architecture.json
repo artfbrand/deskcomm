@@ -1,0 +1,465 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AFB Comercial Outbound — bootstrap assistido",
+    "subtitle": "configuração tenant-aware, aprovação humana e trilha nativa sem efeitos comerciais no momento da sugestão; o playbook persistido entra só em SHADOW — lido, validado e comparado, nunca decidindo",
+    "quality_profile": "standard",
+    "notas_da_fase_c": [
+      "O registry TypeScript é a ÚNICA autoridade operacional: ele decide etapa, copy e sugestão. O playbook persistido NÃO participa de nenhuma decisão.",
+      "O persistido é SHADOW e SOMENTE LEITURA: é lido, validado e comparado. Nenhuma escrita ocorre nesta fase em ai_playbooks, ai_playbook_versions ou em qualquer tabela do CRM.",
+      "O resultado do shadow (PlaybookShadowResult) NÃO entra no contrato HTTP e nunca chega ao navegador: ele vai para o log e é descartado.",
+      "Nenhum efeito comercial decorre da observação: nada é enviado, agendado, movido de etapa ou gravado.",
+      "A observação roda DEPOIS do envio da resposta (after() do Next) e é fail-open: qualquer falha — leitura, validação, hash, log, agendamento — deixa a resposta do copiloto intacta.",
+      "NÃO existe binding persistido: o funil continua apontando para o id legado do registry (afb_comercial_v1). A troca de binding é fase posterior e explícita."
+    ]
+  },
+  "lanes": [
+    {
+      "id": "entrada",
+      "label": "Seleção explícita"
+    },
+    {
+      "id": "config",
+      "label": "Configuração nativa"
+    },
+    {
+      "id": "runtime",
+      "label": "Execução assistida"
+    },
+    {
+      "id": "evidencia",
+      "label": "Evidência e observabilidade"
+    },
+    {
+      "id": "shadow",
+      "label": "Shadow do playbook (somente leitura)"
+    }
+  ],
+  "mainPath": [
+    "cli",
+    "org",
+    "agent",
+    "draft",
+    "human",
+    "event"
+  ],
+  "nodes": [
+    {
+      "id": "cli",
+      "lane": "entrada",
+      "label": "scripts/afb/provisionar",
+      "type": "service"
+    },
+    {
+      "id": "org",
+      "lane": "entrada",
+      "label": "organizations",
+      "type": "table"
+    },
+    {
+      "id": "documents",
+      "lane": "config",
+      "label": "Markdown AFB + SHA-256",
+      "type": "config"
+    },
+    {
+      "id": "pipeline",
+      "lane": "config",
+      "label": "crm_pipelines.settings",
+      "type": "table"
+    },
+    {
+      "id": "credential",
+      "lane": "config",
+      "label": "credencial OpenAI validada",
+      "type": "config"
+    },
+    {
+      "id": "catalog",
+      "lane": "config",
+      "label": "ai_models",
+      "type": "table"
+    },
+    {
+      "id": "knowledge",
+      "lane": "config",
+      "label": "conhecimento RAG",
+      "type": "table"
+    },
+    {
+      "id": "memory",
+      "lane": "config",
+      "label": "memória organizacional",
+      "type": "table"
+    },
+    {
+      "id": "agent",
+      "lane": "runtime",
+      "label": "agente + versão assistida",
+      "type": "service"
+    },
+    {
+      "id": "draft",
+      "lane": "runtime",
+      "label": "ai_reply_drafts",
+      "type": "table"
+    },
+    {
+      "id": "human",
+      "lane": "runtime",
+      "label": "revisão humana",
+      "type": "frontend"
+    },
+    {
+      "id": "event",
+      "lane": "evidencia",
+      "label": "evento comprovado",
+      "type": "messagebus"
+    },
+    {
+      "id": "observability",
+      "lane": "evidencia",
+      "label": "runs · calls · audit · event_log",
+      "type": "table"
+    },
+    {
+      "id": "rota_copiloto",
+      "lane": "runtime",
+      "type": "service",
+      "label": "GET /api/v1/afb/copiloto/[conversationId]"
+    },
+    {
+      "id": "registry",
+      "lane": "runtime",
+      "type": "config",
+      "label": "registry TypeScript — AUTORIDADE operacional"
+    },
+    {
+      "id": "contexto",
+      "lane": "runtime",
+      "type": "frontend",
+      "label": "ContextoDoCopiloto (a ÚNICA resposta HTTP)"
+    },
+    {
+      "id": "pos_resposta",
+      "lane": "shadow",
+      "type": "service",
+      "label": "agendarPosResposta — after() do Next, depois do flush"
+    },
+    {
+      "id": "shadow_afb",
+      "lane": "shadow",
+      "type": "service",
+      "label": "shadow-afb — afb_comercial_v1 → slug afb_comercial"
+    },
+    {
+      "id": "shadow_generico",
+      "lane": "shadow",
+      "type": "service",
+      "label": "playbooks/shadow — precedência e 3 hashes"
+    },
+    {
+      "id": "carregador",
+      "lane": "shadow",
+      "type": "service",
+      "label": "playbooks/carregador — SOMENTE LEITURA, org explícita"
+    },
+    {
+      "id": "ai_playbooks",
+      "lane": "shadow",
+      "type": "table",
+      "label": "ai_playbooks (ponteiro) — read-only nesta fase"
+    },
+    {
+      "id": "ai_playbook_versions",
+      "lane": "shadow",
+      "type": "table",
+      "label": "ai_playbook_versions (imutável) — read-only nesta fase"
+    },
+    {
+      "id": "zod",
+      "lane": "shadow",
+      "type": "config",
+      "label": "validarDefinicao (Zod) — forma da definição persistida"
+    },
+    {
+      "id": "hash",
+      "lane": "shadow",
+      "type": "config",
+      "label": "canonicalHash — igualdade por hash, nunca JSON.stringify"
+    },
+    {
+      "id": "comparacao",
+      "lane": "shadow",
+      "type": "config",
+      "label": "match · mismatch · missing · invalid · conflict"
+    },
+    {
+      "id": "log_shadow",
+      "lane": "evidencia",
+      "type": "messagebus",
+      "label": "logger \"playbook.shadow\" — ÚNICO destino"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "cli",
+      "to": "org",
+      "label": "UUID ou slug obrigatório"
+    },
+    {
+      "id": "e2",
+      "from": "org",
+      "to": "pipeline",
+      "label": "filtro organization_id"
+    },
+    {
+      "id": "e3",
+      "from": "pipeline",
+      "to": "agent",
+      "label": "UUID + playbook"
+    },
+    {
+      "id": "e4",
+      "from": "credential",
+      "to": "catalog",
+      "label": "modelos disponíveis"
+    },
+    {
+      "id": "e5",
+      "from": "catalog",
+      "to": "agent",
+      "label": "modelo com tools"
+    },
+    {
+      "id": "e6",
+      "from": "org",
+      "to": "credential",
+      "label": "view segura"
+    },
+    {
+      "id": "e7",
+      "from": "org",
+      "to": "knowledge",
+      "label": "acervo tenant-aware"
+    },
+    {
+      "id": "e8",
+      "from": "knowledge",
+      "to": "agent",
+      "label": "knowledge_source_ids"
+    },
+    {
+      "id": "e9",
+      "from": "org",
+      "to": "memory",
+      "label": "memória tenant-aware"
+    },
+    {
+      "id": "e10",
+      "from": "memory",
+      "to": "agent",
+      "label": "contexto adicional"
+    },
+    {
+      "id": "e11",
+      "from": "agent",
+      "to": "draft",
+      "label": "sugestão, não envio"
+    },
+    {
+      "id": "e12",
+      "from": "draft",
+      "to": "human",
+      "label": "aprovação obrigatória"
+    },
+    {
+      "id": "e13",
+      "from": "human",
+      "to": "event",
+      "label": "envio real confirmado"
+    },
+    {
+      "id": "e14",
+      "from": "event",
+      "to": "observability",
+      "label": "correlação"
+    },
+    {
+      "id": "e15",
+      "from": "observability",
+      "to": "cli",
+      "label": "auditoria do apply"
+    },
+    {
+      "id": "e16",
+      "from": "draft",
+      "to": "observability",
+      "label": "contexto e trace"
+    },
+    {
+      "id": "e17",
+      "from": "event",
+      "to": "pipeline",
+      "label": "efeito futuro permitido"
+    },
+    {
+      "id": "e18",
+      "from": "credential",
+      "to": "cli",
+      "label": "ausência vira aviso"
+    },
+    {
+      "id": "e19",
+      "from": "knowledge",
+      "to": "observability",
+      "label": "knowledge_searches"
+    },
+    {
+      "id": "e20",
+      "from": "memory",
+      "to": "observability",
+      "label": "gap de versão documentado"
+    },
+    {
+      "id": "e21",
+      "from": "cli",
+      "to": "documents",
+      "label": "lê caminhos declarados"
+    },
+    {
+      "id": "e22",
+      "from": "documents",
+      "to": "knowledge",
+      "label": "conteúdo + hash"
+    },
+    {
+      "id": "e23",
+      "from": "documents",
+      "to": "memory",
+      "label": "princípios versionados"
+    },
+    {
+      "id": "e24",
+      "from": "documents",
+      "to": "observability",
+      "label": "versão/hash; snapshot futuro"
+    },
+    {
+      "id": "e25",
+      "from": "pipeline",
+      "to": "rota_copiloto",
+      "label": "settings.modulos.copiloto_comercial.playbook_id"
+    },
+    {
+      "id": "e26",
+      "from": "rota_copiloto",
+      "to": "registry",
+      "label": "resolve pelo id legado (gate + getPlaybook)"
+    },
+    {
+      "id": "e27",
+      "from": "registry",
+      "to": "contexto",
+      "label": "DECIDE etapa, copy e sugestão"
+    },
+    {
+      "id": "e28",
+      "from": "contexto",
+      "to": "human",
+      "label": "200 — contrato HTTP inalterado"
+    },
+    {
+      "id": "e29",
+      "from": "rota_copiloto",
+      "to": "pos_resposta",
+      "label": "agenda APÓS o contexto pronto; catch fail-open na rota"
+    },
+    {
+      "id": "e30",
+      "from": "pos_resposta",
+      "to": "shadow_afb",
+      "label": "executa depois do flush da resposta"
+    },
+    {
+      "id": "e31",
+      "from": "contexto",
+      "to": "shadow_afb",
+      "label": "LÊ o playbook_id já decidido; não re-resolve"
+    },
+    {
+      "id": "e32",
+      "from": "shadow_afb",
+      "to": "shadow_generico",
+      "label": "identidade (organization_id, slug) + sha do registry"
+    },
+    {
+      "id": "e33",
+      "from": "shadow_generico",
+      "to": "carregador",
+      "label": "organization_id da SESSÃO, nunca do body"
+    },
+    {
+      "id": "e34",
+      "from": "carregador",
+      "to": "ai_playbooks",
+      "label": "SELECT por (organization_id, slug)"
+    },
+    {
+      "id": "e35",
+      "from": "ai_playbooks",
+      "to": "ai_playbook_versions",
+      "label": "published_version_id — ponteiro, nunca max(version_number)"
+    },
+    {
+      "id": "e36",
+      "from": "carregador",
+      "to": "ai_playbook_versions",
+      "label": "SELECT por id = published_version_id + organization_id"
+    },
+    {
+      "id": "e37",
+      "from": "ai_playbook_versions",
+      "to": "zod",
+      "label": "definition jsonb → validação de forma"
+    },
+    {
+      "id": "e38",
+      "from": "ai_playbook_versions",
+      "to": "hash",
+      "label": "sha_persisted × sha_recomputed"
+    },
+    {
+      "id": "e39",
+      "from": "registry",
+      "to": "hash",
+      "label": "sha_registry (adaptador, memoizado)"
+    },
+    {
+      "id": "e40",
+      "from": "zod",
+      "to": "comparacao",
+      "label": "invalid quando a forma não bate"
+    },
+    {
+      "id": "e41",
+      "from": "hash",
+      "to": "comparacao",
+      "label": "conflict · mismatch · match"
+    },
+    {
+      "id": "e42",
+      "from": "comparacao",
+      "to": "log_shadow",
+      "label": "resultado OBSERVADO; nada retorna ao chamador"
+    },
+    {
+      "id": "e43",
+      "from": "carregador",
+      "to": "log_shadow",
+      "label": "not_observed/database_error — fail-open"
+    }
+  ]
+}

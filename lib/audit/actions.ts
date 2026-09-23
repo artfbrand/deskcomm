@@ -457,6 +457,9 @@ export const AUDIT_ACTIONS = [
   "crm_task.updated",
   "crm_task.deleted",
   "organization.switched",
+  // Bootstrap administrativo do Copilot comercial AFB. Uma linha por apply,
+  // com contagens e flags; nunca recebe credencial, chave ou conteúdo secreto.
+  "afb.bootstrap_applied",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

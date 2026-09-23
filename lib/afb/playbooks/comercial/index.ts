@@ -13,7 +13,7 @@ import { CADENCIA } from "./followups";
 import { GUARDRAILS } from "./guardrails";
 import { LIGACAO } from "./ligacao";
 import { EM_DESENVOLVIMENTO, METRICAS, NOTAS_DE_METRICAS } from "./metricas";
-import { OBJECOES } from "./objecoes";
+import { ESTRUTURA_DE_RESPOSTA, OBJECOES } from "./objecoes";
 import { POS_SIM } from "./reuniao";
 import { ETAPAS_WHATSAPP } from "./whatsapp";
 
@@ -30,6 +30,7 @@ export const AFB_COMERCIAL_V1: Playbook = {
   email: EMAIL,
   ligacao: LIGACAO,
   objecoes: OBJECOES,
+  regrasDasObjecoes: [ESTRUTURA_DE_RESPOSTA],
   guardrails: GUARDRAILS,
   metricas: METRICAS,
   notasDeMetricas: NOTAS_DE_METRICAS,
