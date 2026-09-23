@@ -626,7 +626,7 @@ describe("bootstrap AFB Comercial Outbound assistido", () => {
       expect(document.documentPath).not.toContain(".env");
       expect(document.content).not.toMatch(/\bsk-[A-Za-z0-9_-]{12,}\b/);
       expect(document.content).not.toMatch(
-        /(OPENAI_API_KEY|SUPABASE_SERVICE_ROLE_KEY|DB_PASSWORD|JWT_SECRET|WAHA_SECRET)\s*[:=]/,
+        /(OPENAI_API_KEY|SUPABASE_SERVICE_ROLE_KEY|DB_PASSWORD|[A-Z0-9]+_SECRET)\s*[:=]/,
       );
     }
   });
