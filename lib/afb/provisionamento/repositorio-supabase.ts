@@ -304,11 +304,30 @@ export class SupabaseAfbProvisioningRepository implements AfbProvisioningReposit
     };
   }
 
-  async configurePipeline(organizationId: string, pipelineId: string): Promise<boolean> {
+  /**
+   * Grava o módulo do Copiloto no funil e, quando houver, o binding persistido.
+   *
+   * As duas coisas vão na MESMA linha e na mesma escrita, porque são a mesma
+   * decisão vista de dois ângulos: o `settings.modulos.copiloto_comercial`
+   * continua com o id de registry (autoridade do runtime nesta fase) e
+   * `ai_playbook_id` passa a apontar para a linha real de `ai_playbooks`.
+   *
+   * `aiPlaybookId === null` é "não mexa na coluna" — o campo nem entra no
+   * `update`. Nunca é "limpe": ver o contrato na interface.
+   *
+   * O UUID chega PRONTO, de quem acabou de escrever o playbook. Esta função não
+   * busca playbook por slug, por nome nem por versão — se buscasse, o binding
+   * poderia apontar para uma linha diferente da que esta execução tocou.
+   */
+  async configurePipeline(
+    organizationId: string,
+    pipelineId: string,
+    aiPlaybookId: string | null,
+  ): Promise<boolean> {
     const admin = createAdminClient();
     const { data, error } = await admin
       .from("crm_pipelines")
-      .select("settings")
+      .select("settings, ai_playbook_id")
       .eq("organization_id", organizationId)
       .eq("id", pipelineId)
       .eq("is_archived", false)
@@ -316,10 +335,21 @@ export class SupabaseAfbProvisioningRepository implements AfbProvisioningReposit
     if (error || !data) fail("carregar o funil alvo");
     const settings = objectOrEmpty(data.settings);
     const next = buildAfbPipelineSettings(settings);
-    if (canonical(next) === canonical(settings)) return false;
+
+    const settingsMudou = canonical(next) !== canonical(settings);
+    // Só é mudança quando há id A GRAVAR e ele difere do que já está lá. Com a
+    // coluna já correta, a segunda execução não escreve nada — é o que faz o
+    // comando ser repetível sem gerar linha de auditoria a cada rodada.
+    const bindingMudou = aiPlaybookId !== null && data.ai_playbook_id !== aiPlaybookId;
+    if (!settingsMudou && !bindingMudou) return false;
+
+    const patch: { settings?: Record<string, unknown>; ai_playbook_id?: string } = {};
+    if (settingsMudou) patch.settings = next;
+    if (bindingMudou) patch.ai_playbook_id = aiPlaybookId;
+
     const { error: updateError } = await admin
       .from("crm_pipelines")
-      .update({ settings: next })
+      .update(patch)
       .eq("organization_id", organizationId)
       .eq("id", pipelineId);
     if (updateError) fail("configurar o playbook no funil");
