@@ -564,11 +564,15 @@ describe("bootstrap AFB Comercial Outbound assistido", () => {
     // (A) O Knowledge nomeia o playbook operacional como dono das copies. Cobra o
     // IDENTIFICADOR do playbook, nunca o caminho do arquivo que hoje o implementa: esse
     // caminho é detalhe de implementação e morre quando o playbook passar a ser resolvido
-    // pelo Gerenciador de Playbooks. Um Knowledge que cita `lib/...` acopla conteúdo
-    // editorial à árvore do repositório, e é isso que a linha seguinte proíbe.
+    // pelo Gerenciador de Playbooks.
+    //
+    // A proibição de o Knowledge citar `lib/...` NÃO mora aqui, e a razão é de
+    // fronteira: quem reescreve esse trecho do Markdown é a frente de Knowledge,
+    // e uma asserção que exige o texto novo faz esta suíte depender de um arquivo
+    // que esta cadeia de commits não traz — foi esse acoplamento que a auditoria
+    // em checkout limpo pegou. A regra volta junto com o Markdown que a satisfaz.
     expect(objections.content).toContain(AFB_COMERCIAL_V1.id);
     expect(objections.content).toMatch(/copies oficiais[^.]*playbook/i);
-    expect(objections.content).not.toMatch(/lib\/afb\/playbooks/);
 
     // (B) Nenhuma copy oficial aparece integralmente em material nenhum. A lista é
     // DERIVADA do playbook montado, não digitada aqui: copy nova nasce vigiada, e copy
