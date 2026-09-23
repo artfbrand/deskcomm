@@ -48,6 +48,15 @@ import type { PlaybookShadowResult } from "@/lib/playbooks/shadow";
 
 import { GET } from "@/app/api/v1/afb/copiloto/[conversationId]/route";
 
+/**
+ * O binding que acompanha o contexto pelo canal interno. Os cenários deste
+ * arquivo exercem os TRÊS, porque a promessa medida aqui — resposta idêntica —
+ * vale para qualquer binding, não só para o legado.
+ */
+const BINDING_LEGADO = { origem: "legado", registryPlaybookId: "afb_comercial_v1" } as const;
+const BINDING_PERSISTIDO = { origem: "persistido", aiPlaybookId: "eeeeeeee-eeee-4eee-8eee-000000000001" } as const;
+const BINDING_AUSENTE = { origem: "ausente" } as const;
+
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001";
 const CONVERSA = "11111111-1111-4111-8111-000000000001";
 
@@ -93,7 +102,7 @@ const observado = (status: string): PlaybookShadowResult =>
 
 beforeEach(() => {
   requireRole.mockResolvedValue({ ok: true, user: { id: "u-1", idioma: "pt-BR" }, org: { orgId: ORG, name: "AFB", role: "admin" } });
-  carregarContextoDoCopiloto.mockResolvedValue({ tipo: "ok", contexto: CONTEXTO });
+  carregarContextoDoCopiloto.mockResolvedValue({ tipo: "ok", contexto: CONTEXTO, binding: BINDING_LEGADO });
   observarPlaybookDoCopilotoAFB.mockResolvedValue(observado("match"));
   // Por padrão o agendador roda a tarefa na hora: é o pior caso para o
   // isolamento, e mesmo assim a resposta não pode mudar.
@@ -241,5 +250,46 @@ describe("caminhos que não são 200 não agendam nada", () => {
     const r = await respostaOperacional();
     expect(r.status).toBe(403);
     expect(agendarPosResposta).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ─── D.5: o binding também não altera a resposta ────────────────────────────
+ *
+ * O shadow passou a escolher POR ONDE procurar o playbook persistido. Essa
+ * escolha não pode chegar ao navegador — nem como conteúdo diferente, nem como
+ * campo novo, nem como latência de uma leitura aguardada.
+ */
+describe("o BINDING não altera a resposta operacional", () => {
+  it("as três origens produzem exatamente o mesmo status e o mesmo corpo", async () => {
+    const saidas: Array<{ origem: string; status: number; corpo: string }> = [];
+    for (const binding of [BINDING_LEGADO, BINDING_PERSISTIDO, BINDING_AUSENTE]) {
+      carregarContextoDoCopiloto.mockResolvedValue({ tipo: "ok", contexto: CONTEXTO, binding });
+      const r = await respostaOperacional();
+      saidas.push({ origem: binding.origem, ...r });
+    }
+    const primeira = saidas[0]!;
+    expect(primeira.status).toBe(200);
+    for (const s of saidas) {
+      expect({ status: s.status, corpo: s.corpo }, s.origem).toEqual({
+        status: primeira.status,
+        corpo: primeira.corpo,
+      });
+    }
+    // E o corpo continua sendo o contexto do REGISTRY, intacto.
+    expect(JSON.parse(primeira.corpo).data).toEqual(CONTEXTO);
+  });
+
+  it("o binding é ENTREGUE ao shadow, e não aparece no JSON público", async () => {
+    carregarContextoDoCopiloto.mockResolvedValue({ tipo: "ok", contexto: CONTEXTO, binding: BINDING_PERSISTIDO });
+    const r = await respostaOperacional();
+
+    expect(observarPlaybookDoCopilotoAFB).toHaveBeenCalledWith(
+      expect.objectContaining({ binding: BINDING_PERSISTIDO }),
+    );
+    // O UUID do binding não pode ter vazado para o corpo.
+    expect(r.corpo).not.toContain(BINDING_PERSISTIDO.aiPlaybookId);
+    expect(r.corpo).not.toContain("ai_playbook_id");
+    expect(r.corpo).not.toContain("binding");
   });
 });

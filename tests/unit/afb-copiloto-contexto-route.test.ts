@@ -46,6 +46,7 @@ beforeEach(() => {
   vi.mocked(carregarContextoDoCopiloto).mockResolvedValue({
     tipo: "ok",
     contexto: { status: "no_lead", conversation_id: CONV, contact_id: "c1", warnings: [] },
+    binding: { origem: "ausente" },
   });
 });
 
@@ -93,6 +94,7 @@ describe("GET /api/v1/afb/copiloto/[conversationId]", () => {
       vi.mocked(carregarContextoDoCopiloto).mockResolvedValueOnce({
         tipo: "ok",
         contexto: { status, conversation_id: CONV, contact_id: null, warnings: [] } as never,
+        binding: { origem: "ausente" } as never,
       });
       const res = await chamar();
       expect(res.status, status).toBe(200);

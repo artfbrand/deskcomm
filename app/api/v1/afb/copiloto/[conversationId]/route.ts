@@ -92,6 +92,9 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
         client: supabase,
         organizationId: authz.org.orgId,
         playbookId: playbookIdDoContexto(resultado.contexto),
+        // Canal interno: veio ao lado do contexto, não dentro dele, e por isso
+        // não entra na resposta — que continua sendo `ok(resultado.contexto)`.
+        binding: resultado.binding,
       });
     });
   } catch (e) {

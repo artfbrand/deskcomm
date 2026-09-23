@@ -13,6 +13,8 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { lerBindingDoCopiloto, type BindingDoCopiloto } from "@/lib/afb/copiloto/binding";
+
 import {
   escolherLead,
   montarContexto,
@@ -28,7 +30,25 @@ type Cliente = SupabaseClient;
 export type Carregamento =
   | { tipo: "conversa_nao_encontrada" }
   | { tipo: "falha"; mensagem: string }
-  | { tipo: "ok"; contexto: ContextoDoCopiloto };
+  | {
+      tipo: "ok";
+      contexto: ContextoDoCopiloto;
+      /**
+       * O binding do funil — CANAL INTERNO, irmão do contexto e nunca dentro
+       * dele.
+       *
+       * A rota responde `ok(resultado.contexto)`; este campo fica de fora do
+       * JSON por construção, não por lembrança. Foi por isso que ele não virou
+       * um campo do `ContextoDoCopiloto`: ali entraria na resposta pública, e
+       * o endereço interno do playbook não tem por que chegar ao browser.
+       *
+       * Quem consome é o shadow, depois da resposta. Nada do runtime o lê.
+       */
+      binding: BindingDoCopiloto;
+    };
+
+/** Nenhum funil carregado ⇒ nenhum binding. Não é falha; é ausência. */
+const SEM_BINDING: BindingDoCopiloto = { origem: "ausente" };
 
 const LEAD_COLS = "id, organization_id, pipeline_id, stage_id, status, title, updated_at, last_activity_at, created_at, custom_fields";
 
@@ -48,7 +68,7 @@ export async function carregarContextoDoCopiloto(
   const conversa = conv.data as ConversaMinima;
 
   const base = { conversation_id: conversa.id, contact_id: conversa.contact_id, warnings: [] as string[] };
-  if (!conversa.contact_id) return { tipo: "ok", contexto: { ...base, status: "no_contact" } };
+  if (!conversa.contact_id) return { tipo: "ok", contexto: { ...base, status: "no_contact" }, binding: SEM_BINDING };
 
   const [leads, padrao] = await Promise.all([
     supabase
@@ -72,17 +92,26 @@ export async function carregarContextoDoCopiloto(
     (leads.data ?? []) as LeadDoCopiloto[],
     (padrao.data as { id: string } | null)?.id ?? null,
   );
-  if (escolha.tipo === "no_contact") return { tipo: "ok", contexto: { ...base, status: "no_contact" } };
-  if (escolha.tipo === "no_lead") return { tipo: "ok", contexto: { ...base, status: "no_lead" } };
+  if (escolha.tipo === "no_contact") return { tipo: "ok", contexto: { ...base, status: "no_contact" }, binding: SEM_BINDING };
+  if (escolha.tipo === "no_lead") return { tipo: "ok", contexto: { ...base, status: "no_lead" }, binding: SEM_BINDING };
   if (escolha.tipo === "ambiguous_lead") {
-    return { tipo: "ok", contexto: { ...base, status: "ambiguous_lead", candidate_lead_ids: escolha.candidateIds } };
+    return {
+      tipo: "ok",
+      contexto: { ...base, status: "ambiguous_lead", candidate_lead_ids: escolha.candidateIds },
+      binding: SEM_BINDING,
+    };
   }
   const lead = escolha.lead;
 
   const [pipeline, stage] = await Promise.all([
     supabase
       .from("crm_pipelines")
-      .select("id, organization_id, settings")
+      // `ai_playbook_id` (migration 0234) é o binding persistido. Ele PRECISA
+      // estar aqui: `lerBindingDoCopiloto` trata coluna ausente como
+      // `undefined`, que libera o caminho legado — então esquecê-lo faria tudo
+      // "funcionar" pelo legado e esconderia a ausência do binding novo. Há
+      // teste que lê esta string e reprova a remoção.
+      .select("id, organization_id, settings, ai_playbook_id")
       .eq("id", lead.pipeline_id)
       .eq("organization_id", orgId)
       .maybeSingle(),
@@ -97,13 +126,22 @@ export async function carregarContextoDoCopiloto(
   if (pipeline.error) return { tipo: "falha", mensagem: pipeline.error.message };
   if (stage.error) return { tipo: "falha", mensagem: stage.error.message };
 
+  // A coluna do binding é lida da linha CRUA, antes do estreitamento para
+  // `FunilMinimo`: o tipo do contexto não a conhece, e não precisa conhecer —
+  // ela não participa de nada que o Copiloto responde.
+  const funil = pipeline.data as (FunilMinimo & { ai_playbook_id?: unknown }) | null;
+
   return {
     tipo: "ok",
     contexto: montarContexto({
       conversa,
       lead,
-      pipeline: (pipeline.data as FunilMinimo | null) ?? null,
+      pipeline: funil ?? null,
       stage: (stage.data as ColunaMinima | null) ?? null,
+    }),
+    binding: lerBindingDoCopiloto({
+      aiPlaybookId: funil?.ai_playbook_id,
+      settings: funil?.settings ?? null,
     }),
   };
 }

@@ -117,11 +117,20 @@ function clienteFalso() {
   };
 }
 
-function observar(shaRegistry = SHA_VALIDA): Promise<PlaybookShadowResult> {
+function observar(
+  shaRegistry = SHA_VALIDA,
+  // Por slug é o caminho LEGADO, e é o que os casos deste arquivo exerciam
+  // antes do binding persistido existir. Mantê-lo como padrão preserva o
+  // significado de cada um deles; o caminho por id tem bloco próprio no fim.
+  identidade: { por: "slug"; slug: string } | { por: "id"; playbookId: string } = {
+    por: "slug",
+    slug: SLUG,
+  },
+): Promise<PlaybookShadowResult> {
   return observarPlaybookEmShadow({
     client: clienteFalso() as never,
     organizationId: ORG,
-    slug: SLUG,
+    identidade,
     registryPlaybookId: ID_LEGADO,
     shaDoRegistry: () => {
       vezesQueOSthaDoRegistryFoiCalculado += 1;
