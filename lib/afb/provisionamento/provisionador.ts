@@ -1,12 +1,16 @@
 import { escolherModeloDoProvedor } from "@/lib/ai/agents/escolher-modelo";
 import { mergeConfiguracaoDeModulos, playbookIdDoCopiloto } from "@/lib/pipelines/modulos";
 
+import { AFB_COMERCIAL_V1 } from "@/lib/afb/playbooks/comercial";
+import { deRegistryParaDefinicao } from "@/lib/playbooks/adaptador-afb";
+
 import {
   AFB_AGENT_NAME,
   AFB_ALLOWED_TOOL_IDS,
   AFB_BOOTSTRAP_VERSION,
   AFB_MEMORY_TITLE,
   AFB_PLAYBOOK_ID,
+  AFB_PLAYBOOK_PERSISTIDO,
   AFB_SYSTEM_PROMPT,
   OPENAI_CREDENTIAL_WARNING,
 } from "./configuracao";
@@ -67,6 +71,25 @@ export interface ExistingKnowledgeRef {
   faqItems: readonly { question: string | null; tags: readonly string[] }[];
 }
 
+/**
+ * O playbook persistido desta organização com o slug do bootstrap, como está
+ * no banco. `null` quando não existe — o caso de toda instalação de hoje.
+ */
+export interface ExistingPlaybookRef {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  /** Marca de propriedade do bootstrap (`metadata.afb_bootstrap.key`). `null` = registro humano. */
+  bootstrapKey: string | null;
+  publishedVersionId: string | null;
+  /** `definition_sha256` da versão publicada; `null` quando nunca publicou. */
+  publishedVersionSha256: string | null;
+  publishedVersionNumber: number | null;
+  /** sha256 canônico do `draft`, quando há draft. */
+  draftSha256: string | null;
+}
+
 export interface ExistingAgentRef {
   id: string;
   name: string;
@@ -91,6 +114,8 @@ export interface ProvisioningSnapshot {
   memoryEntriesWithTitle: number;
   memory: ExistingMemoryRef | null;
   agent: ExistingAgentRef | null;
+  /** O playbook persistido com o slug do bootstrap. Ausente na instalação que ainda não o tem. */
+  playbook: ExistingPlaybookRef | null;
 }
 
 export interface AgentBootstrapInput {
@@ -142,6 +167,10 @@ export interface AfbProvisioningAuditSummary {
   knowledgeChanged: number;
   memoryChanged: boolean;
   agentChanged: boolean;
+  /** A ação executada no playbook persistido, ou `null` quando nada foi tocado. */
+  playbookAction: AcaoDoPlaybook;
+  playbookVersionNumber: number | null;
+  playbookSha256: string;
   documents: readonly {
     key: string;
     kind: "knowledge" | "memory";
@@ -151,8 +180,35 @@ export interface AfbProvisioningAuditSummary {
   }[];
 }
 
+/** O que o bootstrap precisa gravar para o playbook — nunca o conteúdo, que vem do adaptador. */
+export interface PlaybookBootstrapInput {
+  organizationId: string;
+  slug: string;
+  name: string;
+  description: string;
+  definition: unknown;
+  definitionSha256: string;
+}
+
+export interface PlaybookUpsertResult {
+  id: string;
+  versionId: string | null;
+  versionNumber: number | null;
+  created: boolean;
+  published: boolean;
+  adopted: boolean;
+}
+
 export interface AfbProvisioningRepository {
   inspect(organizationIdentifier: string): Promise<ProvisioningSnapshot | null>;
+  /** Cria o ponteiro com o draft e publica a v1. Idempotente por (organization_id, slug). */
+  createAndPublishPlaybook(input: PlaybookBootstrapInput): Promise<PlaybookUpsertResult>;
+  /** Conclui a publicação de um ponteiro que já existe com o draft certo (falha parcial). */
+  publishPlaybookVersion(
+    input: PlaybookBootstrapInput & { playbookId: string },
+  ): Promise<PlaybookUpsertResult>;
+  /** Adota um registro equivalente: grava SÓ a marca de propriedade, preservando ids e versões. */
+  adoptPlaybook(organizationId: string, playbookId: string): Promise<PlaybookUpsertResult>;
   configurePipeline(organizationId: string, pipelineId: string): Promise<boolean>;
   upsertKnowledgeSource(
     organizationId: string,
@@ -194,6 +250,17 @@ export interface ProvisioningReport {
     documentPath: string;
     sha256: string;
     action: "create" | "update" | "unchanged" | "conflict";
+  };
+  /**
+   * O playbook PERSISTIDO (Fase B) — paralelo ao runtime, que segue lendo o
+   * registry em código. `sha256` vem do adaptador, nunca de constante.
+   */
+  persistedPlaybook: {
+    slug: string;
+    name: string;
+    sha256: string;
+    action: AcaoDoPlaybook;
+    reason: string;
   };
   changes: string[];
   warnings: string[];
@@ -389,8 +456,76 @@ function knowledgePlan(
   });
 }
 
+/**
+ * O PLANO do playbook persistido — conservador por construção.
+ *
+ * O provisionador está criando o PRIMEIRO estado persistido de algo que, a
+ * partir da fase seguinte, passa a ser editado por gente na tela. Então ele
+ * nunca republica, nunca sobrescreve e nunca toma posse sem prova:
+ *
+ *   create    — não existe playbook com este slug nesta organização.
+ *   publish   — existe, é NOSSO, nunca publicou, e o draft é exatamente a
+ *               definição do adaptador. É a retomada de um apply que criou o
+ *               ponteiro e morreu antes de publicar; publicar aqui é concluir
+ *               o que ficou pela metade, não sobrescrever nada.
+ *   unchanged — existe, é nosso, e a versão publicada tem o MESMO sha.
+ *   adopt     — existe com o nosso slug, SEM marca de propriedade, mas com uma
+ *               versão publicada cujo sha é byte a byte o nosso. É o mesmo
+ *               playbook por prova, não por nome: adotar só grava a marca,
+ *               preservando `ai_playbooks.id` e todas as versões.
+ *   conflict  — todo o resto. Inclui: nosso com sha publicado DIFERENTE (houve
+ *               publicação humana — o provisionador não passa por cima),
+ *               nosso sem versão e com draft diferente (alguém editou), e
+ *               registro humano que apenas se parece com o nosso.
+ *
+ * Nenhuma decisão olha o NOME: nome é rótulo editável. O que decide é o par
+ * (organização, slug), a marca de propriedade e o sha da definição.
+ */
+export type AcaoDoPlaybook = "create" | "publish" | "unchanged" | "adopt" | "conflict";
+
+/**
+ * A definição a persistir, derivada do registry em código. Vive aqui para o
+ * provisionador nunca carregar JSON duplicado: `lib/playbooks/adaptador-afb.ts`
+ * é a única forma de produzir a definição, e `canonicalHash` a única de
+ * produzir o sha.
+ */
+export function construirDefinicaoDoPlaybook(): { definition: unknown; sha256: string } {
+  const { definition, sha256 } = deRegistryParaDefinicao(AFB_COMERCIAL_V1);
+  return { definition, sha256 };
+}
+
+export function playbookPlan(
+  existing: ExistingPlaybookRef | null,
+  definitionSha256: string,
+  bootstrapKey: string,
+): { action: AcaoDoPlaybook; reason: string } {
+  if (!existing) return { action: "create", reason: "nenhum playbook com este slug na organização" };
+
+  const nosso = existing.bootstrapKey === bootstrapKey;
+
+  if (nosso) {
+    if (existing.publishedVersionSha256 === definitionSha256) {
+      return { action: "unchanged", reason: "versão publicada tem o mesmo conteúdo" };
+    }
+    if (existing.publishedVersionId === null) {
+      return existing.draftSha256 === definitionSha256
+        ? { action: "publish", reason: "ponteiro do bootstrap sem versão publicada, com o draft correto" }
+        : { action: "conflict", reason: "ponteiro do bootstrap sem versão publicada e com draft diferente do repositório" };
+    }
+    return { action: "conflict", reason: "versão publicada tem conteúdo diferente do repositório" };
+  }
+
+  // Sem marca de propriedade: só se adota com prova inequívoca.
+  if (existing.publishedVersionId !== null && existing.publishedVersionSha256 === definitionSha256) {
+    return { action: "adopt", reason: "registro sem marca de propriedade, com versão publicada idêntica ao repositório" };
+  }
+  return { action: "conflict", reason: "existe um playbook com este slug que não pertence ao bootstrap" };
+}
+
 export interface ProvisioningDependencies {
   loadDocuments?: () => Promise<DocumentosAfbCarregados>;
+  /** A definição persistida vem SEMPRE do adaptador; injetável só para teste. */
+  buildPlaybookDefinition?: () => { definition: unknown; sha256: string };
 }
 
 export async function provisionAfbCommercialOutbound(
@@ -415,6 +550,14 @@ export async function provisionAfbCommercialOutbound(
   const session = selectSession(snapshot, options.channelSessionId);
   const model = selectModel(snapshot, credential, options.model);
   const knowledge = knowledgePlan(snapshot, documents);
+  // A definição persistida é SEMPRE a do adaptador — nunca JSON escrito à mão
+  // aqui, nunca um sha de constante.
+  const playbookDefinicao = (dependencies.buildPlaybookDefinition ?? construirDefinicaoDoPlaybook)();
+  const playbookPlano = playbookPlan(
+    snapshot.playbook,
+    playbookDefinicao.sha256,
+    AFB_PLAYBOOK_PERSISTIDO.slug,
+  );
   const memoryAction: ProvisioningReport["memory"]["action"] =
     snapshot.memoryEntriesWithTitle > 1
       ? "conflict"
@@ -446,6 +589,12 @@ export async function provisionAfbCommercialOutbound(
       "Há mais de uma memória com o título reservado; remova a ambiguidade antes do apply.",
     );
   }
+  if (playbookPlano.action === "conflict") {
+    warnings.push(
+      `O playbook persistido «${AFB_PLAYBOOK_PERSISTIDO.slug}» não será tocado: ${playbookPlano.reason}. ` +
+        "Nenhuma versão é publicada por cima de conteúdo humano — resolva pela tela ou renomeie o registro.",
+    );
+  }
 
   const readyToPublish =
     pipeline !== null &&
@@ -459,6 +608,7 @@ export async function provisionAfbCommercialOutbound(
     ...(pipeline ? [`configurar playbook ${AFB_PLAYBOOK_ID} no funil ${pipeline.id}`] : []),
     ...knowledge.map((entry) => `${entry.action}: conhecimento ${entry.name}`),
     `${memoryAction}: memória ${AFB_MEMORY_TITLE}`,
+    `${playbookPlano.action}: playbook ${AFB_PLAYBOOK_PERSISTIDO.name}`,
     readyToPublish
       ? `${snapshot.agent ? "atualizar" : "criar"} e publicar ${AFB_AGENT_NAME} em modo assistido`
       : `preparar ${AFB_AGENT_NAME}; publicação pendente das dependências indicadas`,
@@ -490,6 +640,13 @@ export async function provisionAfbCommercialOutbound(
       documentPath: documents.memory.documentPath,
       sha256: documents.memory.sha256,
       action: memoryAction,
+    },
+    persistedPlaybook: {
+      slug: AFB_PLAYBOOK_PERSISTIDO.slug,
+      name: AFB_PLAYBOOK_PERSISTIDO.name,
+      sha256: playbookDefinicao.sha256,
+      action: playbookPlano.action,
+      reason: playbookPlano.reason,
     },
     changes,
     warnings,
@@ -559,11 +716,40 @@ export async function provisionAfbCommercialOutbound(
     agentChanged = agent.changed;
   }
 
+  // ─── Playbook persistido (Fase B) ────────────────────────────────────────
+  //
+  // Paralelo ao runtime: o funil continua com `playbook_id: afb_comercial_v1`
+  // e o Copiloto continua lendo o registry em código. `unchanged` e `conflict`
+  // não escrevem NADA — em conflito, o provisionador prefere parar a passar por
+  // cima do que uma pessoa publicou.
+  let playbookAplicado: PlaybookUpsertResult | null = null;
+  const playbookInput: PlaybookBootstrapInput = {
+    organizationId: snapshot.organization.id,
+    slug: AFB_PLAYBOOK_PERSISTIDO.slug,
+    name: AFB_PLAYBOOK_PERSISTIDO.name,
+    description: AFB_PLAYBOOK_PERSISTIDO.description,
+    definition: playbookDefinicao.definition,
+    definitionSha256: playbookDefinicao.sha256,
+  };
+  if (playbookPlano.action === "create") {
+    playbookAplicado = await repository.createAndPublishPlaybook(playbookInput);
+  } else if (playbookPlano.action === "publish" && snapshot.playbook) {
+    playbookAplicado = await repository.publishPlaybookVersion({
+      ...playbookInput,
+      playbookId: snapshot.playbook.id,
+    });
+  } else if (playbookPlano.action === "adopt" && snapshot.playbook) {
+    playbookAplicado = await repository.adoptPlaybook(snapshot.organization.id, snapshot.playbook.id);
+  }
+
   await repository.recordAudit(snapshot.organization.id, {
     pipelineChanged,
     knowledgeChanged: sources.filter((source) => source.changed).length,
     memoryChanged,
     agentChanged,
+    playbookAction: playbookPlano.action,
+    playbookVersionNumber: playbookAplicado?.versionNumber ?? null,
+    playbookSha256: playbookDefinicao.sha256,
     documents: [
       ...documents.knowledge.map((document) => ({
         key: document.key,

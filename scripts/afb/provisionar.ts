@@ -46,7 +46,7 @@ export function parseProvisioningArgs(args: readonly string[]): ProvisioningOpti
   };
 }
 
-function formatReport(report: Awaited<ReturnType<typeof provisionAfbCommercialOutbound>>): string {
+export function formatReport(report: Awaited<ReturnType<typeof provisionAfbCommercialOutbound>>): string {
   const lines = [
     `Modo: ${report.mode}`,
     `Organização: ${report.organization.displayName} (${report.organization.slug}; ${report.organization.id})`,
@@ -63,6 +63,12 @@ function formatReport(report: Awaited<ReturnType<typeof provisionAfbCommercialOu
         `  - ${item.action}: ${item.name} ← ${item.documentPath} (sha256:${item.sha256.slice(0, 12)}…)`,
     ),
     `Memória: ${report.memory.action}: ${report.memory.title} ← ${report.memory.documentPath} (sha256:${report.memory.sha256.slice(0, 12)}…)`,
+    // O playbook PERSISTIDO é outra coisa do que o `Playbook:` acima: aquele é
+    // o id legado que o funil grava e que o runtime lê; este é o registro
+    // versionado no banco, que nesta fase existe em paralelo.
+    "Playbook persistido:",
+    `  - ${report.persistedPlaybook.action}: ${report.persistedPlaybook.name} (${report.persistedPlaybook.slug}; sha256:${report.persistedPlaybook.sha256.slice(0, 12)}…)`,
+    `    motivo: ${report.persistedPlaybook.reason}`,
     "Alterações planejadas:",
     ...report.changes.map((change) => `  - ${change}`),
   ];

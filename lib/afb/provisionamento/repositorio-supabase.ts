@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import { audit } from "@/lib/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { canonicalHash } from "@/lib/agent-engine/agent/tool-breaker";
 
 import {
   AFB_AGENT_NAME,
   AFB_BOOTSTRAP_VERSION,
   AFB_MEMORY_TITLE,
   AFB_PLAYBOOK_ID,
+  AFB_PLAYBOOK_PERSISTIDO,
 } from "./configuracao";
 import type { DocumentoAfbCarregado, MemoriaAfbCarregada } from "./documentos";
 import type {
@@ -19,6 +21,8 @@ import type {
   ExistingKnowledgeRef,
   ModelRef,
   PipelineRef,
+  PlaybookBootstrapInput,
+  PlaybookUpsertResult,
   ProvisioningSnapshot,
   UpsertResult,
 } from "./provisionador";
@@ -34,6 +38,23 @@ function objectOrEmpty(value: unknown): JsonObject {
 
 function fail(operation: string): never {
   throw new Error(`Falha ao ${operation}. Consulte os logs do banco sem expor credenciais.`);
+}
+
+/**
+ * A marca de propriedade do bootstrap no `metadata` do playbook persistido.
+ * Mesma forma do `afb_bootstrap` que os materiais já usam — nada de estrutura
+ * nova, e o `legacy_playbook_id` fica como referência de origem, nunca como
+ * identidade (a identidade é `organization_id` + `slug`).
+ */
+function playbookBootstrapMetadata(slug: string): JsonObject {
+  return {
+    afb_bootstrap: {
+      key: slug,
+      legacy_playbook_id: AFB_PLAYBOOK_ID,
+      source: "afb-provision",
+      bootstrap_version: AFB_BOOTSTRAP_VERSION,
+    },
+  };
 }
 
 function bootstrapKey(metadata: unknown): string | null {
@@ -159,8 +180,55 @@ export class SupabaseAfbProvisioningRepository implements AfbProvisioningReposit
             .in("knowledge_source_id", sourceIds);
     if (faqItems.error) fail("carregar os itens dos materiais AFB");
 
+    // O playbook persistido é identificado por (organização, slug) — nunca
+    // pelo nome, que é rótulo editável. A versão publicada é lida à parte para
+    // o plano comparar o `definition_sha256` sem carregar a definição inteira.
+    const { data: playbookRow, error: playbookErro } = await admin
+      .from("ai_playbooks")
+      .select("id, slug, name, status, metadata, draft, published_version_id")
+      .eq("organization_id", organizationId)
+      .eq("slug", AFB_PLAYBOOK_PERSISTIDO.slug)
+      .maybeSingle();
+    if (playbookErro) fail("carregar o playbook persistido da AFB");
+
+    let playbook: ProvisioningSnapshot["playbook"] = null;
+    if (playbookRow) {
+      let publishedSha: string | null = null;
+      let publishedNumber: number | null = null;
+      if (playbookRow.published_version_id) {
+        const { data: versao, error: versaoErro } = await admin
+          .from("ai_playbook_versions")
+          .select("id, definition_sha256, version_number")
+          .eq("id", playbookRow.published_version_id)
+          .eq("organization_id", organizationId)
+          .maybeSingle();
+        if (versaoErro) fail("carregar a versão publicada do playbook AFB");
+        publishedSha = versao?.definition_sha256 === undefined ? null : String(versao.definition_sha256);
+        publishedNumber = versao?.version_number === undefined ? null : Number(versao.version_number);
+      }
+      playbook = {
+        id: String(playbookRow.id),
+        slug: String(playbookRow.slug),
+        name: String(playbookRow.name),
+        status: String(playbookRow.status),
+        bootstrapKey: bootstrapKey(playbookRow.metadata),
+        publishedVersionId:
+          playbookRow.published_version_id === null ? null : String(playbookRow.published_version_id),
+        publishedVersionSha256: publishedSha,
+        publishedVersionNumber: publishedNumber,
+        // O sha do draft é calculado com o MESMO algoritmo canônico do
+        // adaptador — é o que permite reconhecer o draft que nós mesmos
+        // gravamos num apply que morreu antes de publicar.
+        draftSha256:
+          playbookRow.draft === null || playbookRow.draft === undefined
+            ? null
+            : canonicalHash(playbookRow.draft),
+      };
+    }
+
     return {
       organization,
+      playbook,
       pipelines: (pipelines.data ?? []).map((row): PipelineRef => ({
         id: String(row.id),
         name: String(row.name),
@@ -658,6 +726,94 @@ export class SupabaseAfbProvisioningRepository implements AfbProvisioningReposit
       } as never,
     );
     if (error) fail("solicitar a indexação do conhecimento AFB");
+  }
+
+  // ─── Playbook persistido (Fase B) ────────────────────────────────────────
+  //
+  // Service role bypassa RLS, então TODA consulta filtra `organization_id`
+  // explicitamente (CLAUDE.md, anti-pattern 10) — e o id vem sempre da
+  // organização já resolvida pelo `inspect`, nunca de argumento externo cru.
+  // A publicação não insere linha à mão: chama a RPC canônica, que numera a
+  // versão sob o lock do ponteiro e move o ponteiro na mesma transação.
+
+  async createAndPublishPlaybook(input: PlaybookBootstrapInput): Promise<PlaybookUpsertResult> {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("ai_playbooks")
+      .insert({
+        organization_id: input.organizationId,
+        slug: input.slug,
+        name: input.name,
+        description: input.description,
+        draft: input.definition as never,
+        metadata: playbookBootstrapMetadata(input.slug),
+      })
+      .select("id")
+      .single();
+    if (error || !data) fail("criar o playbook persistido da AFB");
+    const playbookId = String(data.id);
+    const publicado = await this.publishPlaybookVersion({ ...input, playbookId });
+    return { ...publicado, created: true };
+  }
+
+  async publishPlaybookVersion(
+    input: PlaybookBootstrapInput & { playbookId: string },
+  ): Promise<PlaybookUpsertResult> {
+    const admin = createAdminClient();
+    const { data, error } = await admin.rpc("fn_publish_ai_playbook_version" as never, {
+      p_org: input.organizationId,
+      p_playbook: input.playbookId,
+      p_definition: input.definition,
+      p_definition_sha256: input.definitionSha256,
+      p_created_by: null,
+      p_notes: "bootstrap afb:provision",
+    } as never);
+    if (error) fail("publicar a versão do playbook persistido da AFB");
+    const linha = (Array.isArray(data) ? data[0] : data) as
+      | { version_id?: unknown; version_number?: unknown }
+      | null
+      | undefined;
+    return {
+      id: input.playbookId,
+      versionId: linha?.version_id === undefined ? null : String(linha.version_id),
+      versionNumber: linha?.version_number === undefined ? null : Number(linha.version_number),
+      created: false,
+      published: true,
+      adopted: false,
+    };
+  }
+
+  async adoptPlaybook(organizationId: string, playbookId: string): Promise<PlaybookUpsertResult> {
+    const admin = createAdminClient();
+    // Adoção grava SÓ a marca de propriedade: nada de nome, descrição, draft ou
+    // versão. O registro adotado é, por prova de sha, o mesmo playbook — o que
+    // falta nele é a marca, não o conteúdo.
+    const { data: atual, error: leituraErro } = await admin
+      .from("ai_playbooks")
+      .select("id, metadata, published_version_id")
+      .eq("id", playbookId)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (leituraErro || !atual) fail("ler o playbook a adotar");
+    const { error } = await admin
+      .from("ai_playbooks")
+      .update({
+        metadata: {
+          ...objectOrEmpty(atual.metadata),
+          ...playbookBootstrapMetadata(AFB_PLAYBOOK_PERSISTIDO.slug),
+        } as never,
+      })
+      .eq("id", playbookId)
+      .eq("organization_id", organizationId);
+    if (error) fail("adotar o playbook persistido da AFB");
+    return {
+      id: playbookId,
+      versionId: atual.published_version_id === null ? null : String(atual.published_version_id),
+      versionNumber: null,
+      created: false,
+      published: false,
+      adopted: true,
+    };
   }
 
   async recordAudit(organizationId: string, summary: AfbProvisioningAuditSummary): Promise<void> {

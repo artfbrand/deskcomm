@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import { papelDaEtapaDoFunil } from "@/lib/afb/playbook/mapeamento";
 import { AFB_COMERCIAL_V1 } from "@/lib/afb/playbooks/comercial";
 import { catalogEntry } from "@/lib/mcp/tools/catalog";
+import { canonicalHash } from "@/lib/agent-engine/agent/tool-breaker";
+import { deRegistryParaDefinicao } from "@/lib/playbooks/adaptador-afb";
 
 import {
   AFB_AGENT_NAME,
@@ -15,6 +17,7 @@ import {
   AFB_KNOWLEDGE_SOURCES,
   AFB_MEMORY_TITLE,
   AFB_PLAYBOOK_ID,
+  AFB_PLAYBOOK_PERSISTIDO,
   OPENAI_CREDENTIAL_WARNING,
 } from "./configuracao";
 import {
@@ -27,9 +30,14 @@ import {
   buildAfbPipelineSettings,
   ProvisioningInputError,
   provisionAfbCommercialOutbound,
+  type AfbProvisioningAuditSummary,
   type AfbProvisioningRepository,
   type AgentBootstrapInput,
   type AgentUpsertResult,
+  type ExistingPlaybookRef,
+  playbookPlan,
+  type PlaybookBootstrapInput,
+  type PlaybookUpsertResult,
   type ProvisioningSnapshot,
   type UpsertResult,
 } from "./provisionador";
@@ -40,6 +48,7 @@ const PIPELINE = "00000000-0000-4000-8000-000000000010";
 const CREDENTIAL = "00000000-0000-4000-8000-000000000020";
 const SESSION = "00000000-0000-4000-8000-000000000030";
 const STAGE = "00000000-0000-4000-8000-000000000040";
+const PLAYBOOK = "00000000-0000-4000-8000-000000000060";
 
 function snapshot(): ProvisioningSnapshot {
   return {
@@ -89,11 +98,37 @@ function snapshot(): ProvisioningSnapshot {
     memoryEntriesWithTitle: 0,
     memory: null,
     agent: null,
+    playbook: null,
   };
 }
 
 function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+/**
+ * Toda copy oficial do playbook montado, colhida do próprio objeto.
+ *
+ * A travessia procura a chave `texto`, que é como o playbook nomeia a copy em todos os
+ * seus módulos (objeções, cadência, WhatsApp, ligação, e-mail, reunião). Derivar em vez
+ * de digitar é o que faz o gate envelhecer bem: copy nova entra vigiada sem ninguém
+ * lembrar de atualizar este arquivo.
+ */
+function coletarCopiesOficiais(valor: unknown, encontradas: string[] = []): string[] {
+  if (Array.isArray(valor)) {
+    for (const item of valor) coletarCopiesOficiais(item, encontradas);
+    return encontradas;
+  }
+  if (valor && typeof valor === "object") {
+    for (const [chave, item] of Object.entries(valor as Record<string, unknown>)) {
+      if (chave === "texto" && typeof item === "string" && item.trim().length > 0) {
+        encontradas.push(item.trim());
+      } else {
+        coletarCopiesOficiais(item, encontradas);
+      }
+    }
+  }
+  return encontradas;
 }
 
 class FakeRepository implements AfbProvisioningRepository {
@@ -222,9 +257,78 @@ class FakeRepository implements AfbProvisioningRepository {
     this.writes.indexes++;
   }
 
-  async recordAudit(organizationId: string): Promise<void> {
+  async recordAudit(organizationId: string, summary: AfbProvisioningAuditSummary): Promise<void> {
     expect(organizationId).toBe(ORG);
+    this.ultimaAuditoria = summary;
     this.writes.audits++;
+  }
+
+  // ── Playbook persistido (Fase B) ────────────────────────────────────────
+  //
+  // O fake imita o CONTRATO do banco, não o SQL: quem prova o SQL (constraints,
+  // RPC, numeração sob lock) é `tests/invariants/afb-playbook-bootstrap.test.ts`,
+  // contra o schema real.
+  playbookEnviado: PlaybookBootstrapInput | null = null;
+  ultimaAuditoria: unknown = null;
+  playbookWrites = { created: 0, published: 0, adopted: 0 };
+  playbookVersions: Array<{ id: string; number: number; sha: string }> = [];
+
+  async createAndPublishPlaybook(input: PlaybookBootstrapInput): Promise<PlaybookUpsertResult> {
+    expect(input.organizationId).toBe(ORG);
+    this.playbookEnviado = structuredClone(input) as PlaybookBootstrapInput;
+    expect(this.state.playbook).toBeNull();
+    this.playbookWrites.created++;
+    this.state.playbook = {
+      id: PLAYBOOK,
+      slug: input.slug,
+      name: input.name,
+      status: "draft",
+      bootstrapKey: input.slug,
+      publishedVersionId: null,
+      publishedVersionSha256: null,
+      publishedVersionNumber: null,
+      draftSha256: input.definitionSha256,
+    };
+    const publicado = await this.publishPlaybookVersion({ ...input, playbookId: PLAYBOOK });
+    return { ...publicado, created: true };
+  }
+
+  async publishPlaybookVersion(
+    input: PlaybookBootstrapInput & { playbookId: string },
+  ): Promise<PlaybookUpsertResult> {
+    expect(input.organizationId).toBe(ORG);
+    this.playbookEnviado = structuredClone(input) as PlaybookBootstrapInput;
+    const alvo = this.state.playbook!;
+    expect(alvo.id).toBe(input.playbookId);
+    this.playbookWrites.published++;
+    const numero = this.playbookVersions.length + 1;
+    const versao = { id: `${PLAYBOOK}-v${numero}`, number: numero, sha: input.definitionSha256 };
+    this.playbookVersions.push(versao);
+    this.state.playbook = {
+      ...alvo,
+      status: "published",
+      publishedVersionId: versao.id,
+      publishedVersionSha256: versao.sha,
+      publishedVersionNumber: numero,
+      draftSha256: null,
+    };
+    return { id: input.playbookId, versionId: versao.id, versionNumber: numero, created: false, published: true, adopted: false };
+  }
+
+  async adoptPlaybook(organizationId: string, playbookId: string): Promise<PlaybookUpsertResult> {
+    expect(organizationId).toBe(ORG);
+    this.playbookWrites.adopted++;
+    const alvo = this.state.playbook!;
+    // Adoção grava SÓ a marca: id, versões e conteúdo ficam como estavam.
+    this.state.playbook = { ...alvo, bootstrapKey: AFB_PLAYBOOK_PERSISTIDO.slug };
+    return {
+      id: playbookId,
+      versionId: alvo.publishedVersionId,
+      versionNumber: alvo.publishedVersionNumber,
+      created: false,
+      published: false,
+      adopted: true,
+    };
   }
 }
 
@@ -456,11 +560,30 @@ describe("bootstrap AFB Comercial Outbound assistido", () => {
   it("não duplica o playbook nem as copies oficiais como Knowledge", async () => {
     const documents = await carregarDocumentosAfb();
     const objections = documents.knowledge.find((document) => document.key === "objecoes")!;
-    expect(objections.content).toContain("lib/afb/playbooks/comercial/objecoes.ts");
-    expect(objections.content).toContain("afb_comercial_v1");
-    for (const objection of AFB_COMERCIAL_V1.objecoes) {
-      expect(objections.content).not.toContain(objection.resposta.texto);
+
+    // (A) O Knowledge nomeia o playbook operacional como dono das copies. Cobra o
+    // IDENTIFICADOR do playbook, nunca o caminho do arquivo que hoje o implementa: esse
+    // caminho é detalhe de implementação e morre quando o playbook passar a ser resolvido
+    // pelo Gerenciador de Playbooks. Um Knowledge que cita `lib/...` acopla conteúdo
+    // editorial à árvore do repositório, e é isso que a linha seguinte proíbe.
+    expect(objections.content).toContain(AFB_COMERCIAL_V1.id);
+    expect(objections.content).toMatch(/copies oficiais[^.]*playbook/i);
+    expect(objections.content).not.toMatch(/lib\/afb\/playbooks/);
+
+    // (B) Nenhuma copy oficial aparece integralmente em material nenhum. A lista é
+    // DERIVADA do playbook montado, não digitada aqui: copy nova nasce vigiada, e copy
+    // renomeada não escapa. A menor copy tem 140 caracteres, então `toContain` não produz
+    // coincidência acidental.
+    const copies = coletarCopiesOficiais(AFB_COMERCIAL_V1);
+    expect(copies.length).toBeGreaterThanOrEqual(AFB_COMERCIAL_V1.objecoes.length);
+    for (const document of [...documents.knowledge, documents.memory]) {
+      for (const copy of copies) {
+        expect(document.content, `${document.title} duplica copy oficial do playbook`).not.toContain(
+          copy,
+        );
+      }
     }
+
     expect(
       AFB_KNOWLEDGE_SOURCES.some((source) => source.documentPath.endsWith("afb-comercial-v1.html")),
     ).toBe(false);
@@ -652,5 +775,218 @@ describe("bootstrap AFB Comercial Outbound assistido", () => {
     expect(AFB_KNOWLEDGE_SOURCES).toHaveLength(9);
     expect(new Set(AFB_KNOWLEDGE_SOURCES.map((source) => source.title)).size).toBe(9);
     expect(AFB_MEMORY_TITLE).toBe("AFB — Princípios comerciais e limites");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Fase B — o playbook PERSISTIDO
+//
+// O plano é conservador por construção: nunca republica, nunca sobrescreve e
+// só toma posse com prova de sha. Nenhuma decisão olha o NOME.
+// ───────────────────────────────────────────────────────────────────────────
+
+const DEFINICAO = deRegistryParaDefinicao(AFB_COMERCIAL_V1);
+
+function playbookExistente(over: Partial<ExistingPlaybookRef> = {}): ExistingPlaybookRef {
+  return {
+    id: PLAYBOOK,
+    slug: AFB_PLAYBOOK_PERSISTIDO.slug,
+    name: AFB_PLAYBOOK_PERSISTIDO.name,
+    status: "published",
+    bootstrapKey: AFB_PLAYBOOK_PERSISTIDO.slug,
+    publishedVersionId: PLAYBOOK + "-v1",
+    publishedVersionSha256: DEFINICAO.sha256,
+    publishedVersionNumber: 1,
+    draftSha256: null,
+    ...over,
+  };
+}
+
+const planoDe = (existing: ExistingPlaybookRef | null) =>
+  playbookPlan(existing, DEFINICAO.sha256, AFB_PLAYBOOK_PERSISTIDO.slug);
+
+const semVersao = {
+  status: "draft",
+  publishedVersionId: null,
+  publishedVersionSha256: null,
+  publishedVersionNumber: null,
+} as const;
+
+describe("Fase B — plano do playbook persistido", () => {
+  it("1. não existe → create", () => {
+    expect(planoDe(null).action).toBe("create");
+  });
+
+  it("2. é nosso e a versão publicada tem o mesmo sha → unchanged", () => {
+    expect(planoDe(playbookExistente()).action).toBe("unchanged");
+  });
+
+  it("3. é nosso e a versão publicada tem sha diferente → conflict (não republica por cima de gente)", () => {
+    const plano = planoDe(
+      playbookExistente({ publishedVersionSha256: "f".repeat(64), publishedVersionNumber: 4 }),
+    );
+    expect(plano.action).toBe("conflict");
+    expect(plano.reason).toMatch(/conteúdo diferente/);
+  });
+
+  it("4. existe com o nosso slug mas SEM marca de propriedade → conflict, mesmo com o nome igual", () => {
+    const plano = planoDe(
+      playbookExistente({ bootstrapKey: null, publishedVersionSha256: "e".repeat(64) }),
+    );
+    expect(plano.action).toBe("conflict");
+    expect(plano.reason).toMatch(/não pertence ao bootstrap/);
+  });
+
+  it("5. sem marca de propriedade, mas com versão publicada IDÊNTICA → adopt (prova por sha)", () => {
+    expect(planoDe(playbookExistente({ bootstrapKey: null })).action).toBe("adopt");
+  });
+
+  it("5'. sem marca e sem versão publicada → conflict: não há o que provar", () => {
+    expect(
+      planoDe(playbookExistente({ bootstrapKey: null, ...semVersao, draftSha256: DEFINICAO.sha256 }))
+        .action,
+    ).toBe("conflict");
+  });
+
+  it("6. falha parcial: é nosso, sem versão publicada, com o draft certo → publish (retomada)", () => {
+    expect(planoDe(playbookExistente({ ...semVersao, draftSha256: DEFINICAO.sha256 })).action).toBe(
+      "publish",
+    );
+  });
+
+  it("6'. é nosso, sem versão publicada, com draft DIFERENTE → conflict (alguém editou)", () => {
+    expect(
+      planoDe(playbookExistente({ ...semVersao, draftSha256: "a".repeat(64) })).action,
+    ).toBe("conflict");
+  });
+
+  it("10. nenhuma decisão depende do nome visual: renomear não muda o plano", () => {
+    expect(planoDe(playbookExistente({ name: "Outro nome qualquer" })).action).toBe("unchanged");
+    expect(planoDe(playbookExistente({ name: "", bootstrapKey: null })).action).toBe("adopt");
+  });
+});
+
+describe("Fase B — o provisionador executa o plano", () => {
+  it("7/8. a definição e o hash vêm do ADAPTADOR, nunca de constante no provisionador", async () => {
+    const repository = new FakeRepository();
+    await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    expect(repository.playbookEnviado?.definition).toEqual(DEFINICAO.definition);
+    expect(repository.playbookEnviado?.definitionSha256).toBe(DEFINICAO.sha256);
+    expect(repository.playbookEnviado?.definitionSha256).toBe(canonicalHash(DEFINICAO.definition));
+    expect(repository.playbookEnviado?.slug).toBe("afb_comercial");
+  });
+
+  it("9. a configuração não duplica conteúdo: só identidade, e o legado fica como referência", () => {
+    expect(Object.keys(AFB_PLAYBOOK_PERSISTIDO).sort()).toEqual([
+      "description",
+      "legacyId",
+      "name",
+      "slug",
+    ]);
+    expect(AFB_PLAYBOOK_PERSISTIDO.slug).toBe("afb_comercial");
+    expect(AFB_PLAYBOOK_PERSISTIDO.legacyId).toBe(AFB_PLAYBOOK_ID);
+    expect(AFB_PLAYBOOK_PERSISTIDO.slug).not.toBe(AFB_PLAYBOOK_ID);
+    const texto = JSON.stringify(AFB_PLAYBOOK_PERSISTIDO);
+    for (const copy of coletarCopiesOficiais(AFB_COMERCIAL_V1)) {
+      expect(texto).not.toContain(copy.slice(0, 40));
+    }
+  });
+
+  it("dry-run NÃO escreve nada do playbook e ainda assim declara a ação", async () => {
+    const repository = new FakeRepository();
+    const relatorio = await provisionAfbCommercialOutbound(repository, { organization: ORG }, { loadDocuments: carregarDocumentosAfb });
+    expect(relatorio.persistedPlaybook).toMatchObject({
+      slug: "afb_comercial",
+      name: "AFB Comercial Outbound",
+      action: "create",
+      sha256: DEFINICAO.sha256,
+    });
+    expect(repository.playbookWrites).toEqual({ created: 0, published: 0, adopted: 0 });
+    expect(relatorio.changes).toContain("create: playbook AFB Comercial Outbound");
+  });
+
+  it("IDEMPOTÊNCIA: 1º apply cria 1 playbook + v1; 2º e 3º ficam unchanged, sem v2", async () => {
+    const repository = new FakeRepository();
+    const primeiro = await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    expect(primeiro.persistedPlaybook.action).toBe("create");
+    expect(repository.playbookWrites).toEqual({ created: 1, published: 1, adopted: 0 });
+    expect(repository.playbookVersions.map((v) => v.number)).toEqual([1]);
+
+    for (const _ of [2, 3]) {
+      const seguinte = await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+      expect(seguinte.persistedPlaybook.action).toBe("unchanged");
+    }
+    expect(repository.playbookWrites).toEqual({ created: 1, published: 1, adopted: 0 });
+    expect(repository.playbookVersions).toHaveLength(1);
+    expect(repository.state.playbook?.publishedVersionNumber).toBe(1);
+  });
+
+  it("CONFLITO não escreve: a versão publicada diferente sobrevive intacta e vira aviso", async () => {
+    const repository = new FakeRepository();
+    repository.state.playbook = playbookExistente({
+      publishedVersionSha256: "c".repeat(64),
+      publishedVersionNumber: 7,
+    });
+    const relatorio = await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    expect(relatorio.persistedPlaybook.action).toBe("conflict");
+    expect(repository.playbookWrites).toEqual({ created: 0, published: 0, adopted: 0 });
+    expect(repository.state.playbook?.publishedVersionNumber).toBe(7);
+    expect(relatorio.warnings.join(" ")).toMatch(/não será tocado/);
+  });
+
+  it("RETOMADA: ponteiro nosso sem versão publica a v1 sem criar um segundo ponteiro", async () => {
+    const repository = new FakeRepository();
+    repository.state.playbook = playbookExistente({ ...semVersao, draftSha256: DEFINICAO.sha256 });
+    const relatorio = await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    expect(relatorio.persistedPlaybook.action).toBe("publish");
+    expect(repository.playbookWrites).toEqual({ created: 0, published: 1, adopted: 0 });
+    expect(repository.state.playbook?.id).toBe(PLAYBOOK);
+    expect(repository.playbookVersions.map((v) => v.number)).toEqual([1]);
+  });
+
+  it("ADOÇÃO preserva id e versão: grava só a marca de propriedade", async () => {
+    const repository = new FakeRepository();
+    repository.state.playbook = playbookExistente({ bootstrapKey: null });
+    const relatorio = await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    expect(relatorio.persistedPlaybook.action).toBe("adopt");
+    expect(repository.playbookWrites).toEqual({ created: 0, published: 0, adopted: 1 });
+    expect(repository.state.playbook).toMatchObject({
+      id: PLAYBOOK,
+      publishedVersionId: PLAYBOOK + "-v1",
+      publishedVersionNumber: 1,
+      bootstrapKey: "afb_comercial",
+    });
+    expect(repository.playbookVersions).toHaveLength(0);
+  });
+
+  it("o apply do playbook NÃO altera o binding do funil: segue afb_comercial_v1, sem uuid, slug, version_id ou mode", async () => {
+    const repository = new FakeRepository();
+    await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    const modulo = (
+      repository.state.pipelines[0]!.settings as {
+        modulos: { copiloto_comercial: Record<string, unknown> };
+      }
+    ).modulos.copiloto_comercial;
+    expect(modulo.playbook_id).toBe(AFB_PLAYBOOK_ID);
+    expect(Object.keys(modulo).sort()).toEqual(["enabled", "etapas", "humano", "playbook_id"]);
+  });
+
+  it("a auditoria distingue a ação e carrega o sha, sem tipo de evento novo", async () => {
+    const repository = new FakeRepository();
+    await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    expect(repository.ultimaAuditoria).toMatchObject({
+      playbookAction: "create",
+      playbookVersionNumber: 1,
+      playbookSha256: DEFINICAO.sha256,
+    });
+  });
+
+  it("o registro persistido não ganha campo de autonomia por nenhum caminho", async () => {
+    const repository = new FakeRepository();
+    await provisionAfbCommercialOutbound(repository, { organization: ORG, apply: true }, { loadDocuments: carregarDocumentosAfb });
+    const enviado = JSON.stringify(repository.playbookEnviado);
+    expect(enviado).not.toMatch(
+      /"(mode|assisted|automatic|auto_send|approval_mode|autonomy_mode|require_human_approval)"/,
+    );
   });
 });

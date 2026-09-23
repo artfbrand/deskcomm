@@ -172,3 +172,30 @@ export const AFB_BLOCKED_CRITICAL_TOOL_IDS = [
   "crm_reschedule_appointment",
   "crm_cancel_appointment",
 ] as const;
+
+/**
+ * O playbook PERSISTIDO (Fase B) — identidade lógica, e só ela.
+ *
+ * O CONTEÚDO nunca mora aqui: a definição vem sempre de
+ * `deRegistryParaDefinicao(AFB_COMERCIAL_V1)`, e o hash dela também. Duplicar
+ * qualquer pedaço do roteiro neste arquivo criaria uma segunda fonte de
+ * verdade que envelhece sozinha — é exatamente o que a Fase A0 existe para
+ * impedir.
+ *
+ * `slug` é a identidade estável dentro da organização, e é `afb_comercial` —
+ * NÃO `afb_comercial_v1`. O `_v1` do id legado é a versão do DOCUMENTO no
+ * registry em código; `ai_playbook_versions.version_number` é a versão do
+ * REGISTRO publicado. São réguas diferentes, e colar as duas faria a v2 do
+ * playbook persistido parecer um playbook novo.
+ *
+ * `legacyId` fica só como referência de origem — é o valor que o funil grava
+ * hoje (`settings.modulos.copiloto_comercial.playbook_id`) e que o runtime
+ * continua usando. A Fase B não o troca.
+ */
+export const AFB_PLAYBOOK_PERSISTIDO = {
+  slug: "afb_comercial",
+  name: "AFB Comercial Outbound",
+  description:
+    "Estratégia comercial outbound da AFB: sequência de WhatsApp, objeções, guardrails e cadência de follow-up.",
+  legacyId: AFB_PLAYBOOK_ID,
+} as const;
