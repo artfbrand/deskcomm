@@ -19,7 +19,7 @@ const COL = "dddddddd-dddd-4ddd-8ddd-000000000002";
 const COL_ALHEIA = "dddddddd-dddd-4ddd-8ddd-000000000003";
 
 type Linha = Record<string, unknown>;
-interface Consulta { tabela: string; filtros: Record<string, unknown> }
+interface Consulta { tabela: string; filtros: Record<string, unknown>; colunas: string }
 
 interface Tabelas {
   conversations: Linha[];
@@ -35,19 +35,27 @@ function clienteFalso() {
   return {
     from(tabela: string) {
       const filtros: Record<string, unknown> = {};
+      // As COLUNAS são registradas junto com os filtros: uma coluna esquecida
+      // no `select` não muda nenhum filtro e não quebra nenhuma asserção de
+      // isolamento — ela só faz o campo chegar `undefined`. Sem registrar, esse
+      // defeito é invisível para este arquivo inteiro.
+      let colunas = "";
       const cadeia = {
-        select: () => cadeia,
+        select: (c?: string) => {
+          if (typeof c === "string") colunas = c;
+          return cadeia;
+        },
         eq: (k: string, v: unknown) => {
           filtros[k] = v;
           return cadeia;
         },
         maybeSingle: async () => {
-          consultas.push({ tabela, filtros });
+          consultas.push({ tabela, filtros, colunas });
           const linhas = aplicar(tabela, filtros);
           return { data: linhas[0] ?? null, error: null };
         },
         then: (r: (v: unknown) => unknown) => {
-          consultas.push({ tabela, filtros });
+          consultas.push({ tabela, filtros, colunas });
           return r({ data: aplicar(tabela, filtros), error: null });
         },
       };
@@ -166,5 +174,77 @@ describe("carregarContextoDoCopiloto", () => {
       },
     };
     expect(await carregarContextoDoCopiloto(quebrado as never, ORG, "conv-1")).toEqual({ tipo: "falha", mensagem: 'relation "conversations" does not exist' });
+  });
+});
+
+/**
+ * ─── O binding do funil, e a coluna que precisa estar no SELECT ─────────────
+ *
+ * `lerBindingDoCopiloto` (D.3) trata coluna AUSENTE como `undefined`, e
+ * `undefined` libera o caminho legado. A consequência é desconfortável e é o
+ * motivo deste bloco existir: esquecer `ai_playbook_id` no `.select()` não
+ * quebraria nada visível — tudo continuaria "funcionando" pelo legado, e o
+ * binding persistido simplesmente nunca venceria, em silêncio.
+ *
+ * Um teste que só observe COMPORTAMENTO não pega isso, porque o comportamento
+ * de fallback é idêntico ao de um funil legítimo sem binding. Por isso a
+ * asserção é sobre a CONSULTA.
+ */
+describe("o binding persistido chega ao carregador", () => {
+  const UUID = "eeeeeeee-eeee-4eee-8eee-000000000001";
+
+  const consultaDoFunilAlvo = () =>
+    consultas.filter((c) => c.tabela === "crm_pipelines" && c.filtros.id === FUNIL)[0];
+
+  it("o SELECT do funil pede ai_playbook_id explicitamente", async () => {
+    await carregarContextoDoCopiloto(clienteFalso() as never, ORG, "conv-1");
+    const c = consultaDoFunilAlvo();
+    expect(c, "a consulta do funil alvo tem de existir").toBeDefined();
+    expect(c!.colunas).toContain("ai_playbook_id");
+    // E o que já vinha continua vindo — a coluna nova não substituiu nada.
+    expect(c!.colunas).toContain("settings");
+    expect(c!.colunas).toContain("organization_id");
+  });
+
+  it("coluna preenchida com UUID → binding persistido", async () => {
+    tabelas.crm_pipelines[0]!.ai_playbook_id = UUID;
+    const r = await carregarContextoDoCopiloto(clienteFalso() as never, ORG, "conv-1");
+    expect(r).toMatchObject({ tipo: "ok", binding: { origem: "persistido", aiPlaybookId: UUID } });
+  });
+
+  it("coluna nula → binding legado, lido do jsonb", async () => {
+    tabelas.crm_pipelines[0]!.ai_playbook_id = null;
+    const r = await carregarContextoDoCopiloto(clienteFalso() as never, ORG, "conv-1");
+    expect(r).toMatchObject({
+      tipo: "ok",
+      binding: { origem: "legado", registryPlaybookId: "afb_comercial_v1" },
+    });
+  });
+
+  it("coluna com valor ilegível → ausente, e NÃO cai para o legado (decisão do D.3)", async () => {
+    tabelas.crm_pipelines[0]!.ai_playbook_id = "nao-e-uuid";
+    const r = await carregarContextoDoCopiloto(clienteFalso() as never, ORG, "conv-1");
+    expect(r).toMatchObject({ tipo: "ok", binding: { origem: "ausente" } });
+  });
+
+  it("o binding NÃO entra no contexto — ele é irmão, não filho", async () => {
+    tabelas.crm_pipelines[0]!.ai_playbook_id = UUID;
+    const r = (await carregarContextoDoCopiloto(clienteFalso() as never, ORG, "conv-1")) as unknown as {
+      tipo: "ok";
+      contexto: Record<string, unknown>;
+    };
+    // O contexto é o que a rota serializa. Se o UUID estivesse aqui, ele iria
+    // para o browser — e o endereço interno do playbook não tem por que ir.
+    expect(JSON.stringify(r.contexto)).not.toContain(UUID);
+    expect("binding" in r.contexto).toBe(false);
+  });
+
+  it("caminhos sem funil carregado devolvem binding ausente, nunca undefined", async () => {
+    tabelas.crm_leads = [];
+    const r = (await carregarContextoDoCopiloto(clienteFalso() as never, ORG, "conv-1")) as {
+      tipo: "ok";
+      binding: unknown;
+    };
+    expect(r.binding).toEqual({ origem: "ausente" });
   });
 });

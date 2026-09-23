@@ -19,15 +19,17 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { carregarPlaybookPublicado } from "./carregador";
+import { carregarPlaybookPublicado, carregarPlaybookPublicadoPorId } from "./carregador";
 
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001";
 const OUTRA_ORG = "aaaaaaaa-aaaa-4aaa-8aaa-000000000002";
 const PB = "bbbbbbbb-bbbb-4bbb-8bbb-000000000001";
 const PB_ALHEIO = "bbbbbbbb-bbbb-4bbb-8bbb-000000000002";
+const PB_VIZINHO = "bbbbbbbb-bbbb-4bbb-8bbb-000000000003";
 const V1 = "cccccccc-cccc-4ccc-8ccc-000000000001";
 const V2 = "cccccccc-cccc-4ccc-8ccc-000000000002";
 const V_ALHEIA = "cccccccc-cccc-4ccc-8ccc-000000000009";
+const V_DO_VIZINHO = "cccccccc-cccc-4ccc-8ccc-000000000003";
 const SHA = "a".repeat(64);
 
 type Linha = Record<string, unknown>;
@@ -76,6 +78,8 @@ function clienteFalso() {
 }
 
 const ler = (slug: string, org = ORG) => carregarPlaybookPublicado(clienteFalso() as never, org, slug);
+const lerPorId = (playbookId: string, org = ORG) =>
+  carregarPlaybookPublicadoPorId(clienteFalso() as never, org, playbookId);
 
 beforeEach(() => {
   consultas = [];
@@ -266,5 +270,211 @@ describe("carregarPlaybookPublicado — regras vigiadas no FONTE", () => {
     for (const escrita of ["insert(", "update(", "upsert(", "delete(", ".rpc("]) {
       expect(codigo).not.toContain(escrita);
     }
+  });
+
+  /**
+   * As regras acima varrem o ARQUIVO inteiro, não uma função. Este caso é o que
+   * autoriza dizer que elas valem para as DUAS entradas: se alguém mover a
+   * entrada por id para outro arquivo, ela sai do alcance das varreduras e este
+   * teste é quem denuncia — em vez de o alcance encolher em silêncio.
+   */
+  it("as duas entradas moram neste arquivo, logo as varreduras alcançam as duas", () => {
+    expect(codigo).toContain("export async function carregarPlaybookPublicado(");
+    expect(codigo).toContain("export async function carregarPlaybookPublicadoPorId(");
+  });
+
+  it("a entrada por id não consulta slug em lugar nenhum", () => {
+    const inicio = codigo.indexOf("export async function carregarPlaybookPublicadoPorId(");
+    expect(inicio).toBeGreaterThan(-1);
+    expect(codigo.slice(inicio)).not.toMatch(/\.eq\(\s*"slug"/);
+  });
+});
+
+/**
+ * ─── A entrada por PONTEIRO `(organization_id, id)` ──────────────────────────
+ *
+ * Mesmo banco falso, mesma fixtura, mesmas armadilhas. O que muda é a chave da
+ * primeira consulta — e é exatamente isso que estes casos medem.
+ */
+describe("carregarPlaybookPublicadoPorId — o caminho feliz", () => {
+  it("devolve a versão APONTADA pelo ponteiro, não a de maior número", async () => {
+    const r = await lerPorId(PB);
+    expect(r).toEqual({
+      tipo: "found",
+      playbookId: PB,
+      slug: "afb_comercial",
+      publishedVersionId: V1,
+      versionNumber: 1,
+      definition: { schema_version: 1 },
+      definitionSha256: SHA,
+    });
+    // A v2 existe e tem número maior — a mesma regressão que a entrada por
+    // slug vigia, vigiada de novo pela porta nova.
+    expect((r as { publishedVersionId: string }).publishedVersionId).not.toBe(V2);
+  });
+
+  it("para a MESMA linha, o resultado é idêntico ao da entrada por slug", async () => {
+    const porSlug = await ler("afb_comercial");
+    const porId = await lerPorId(PB);
+    // Quem consome não precisa saber por qual porta o playbook entrou. Se um
+    // dia divergirem, `shadow.ts` passaria a comparar coisas diferentes sem
+    // que nada acusasse.
+    expect(porId).toEqual(porSlug);
+  });
+
+  it("faz DUAS consultas, nesta ordem, e a primeira é por id — nunca por slug", async () => {
+    await lerPorId(PB);
+    expect(consultas).toHaveLength(2);
+    expect(consultas[0]!.tabela).toBe("ai_playbooks");
+    expect(consultas[0]!.filtros).toEqual({ organization_id: ORG, id: PB });
+    expect(consultas[1]!.tabela).toBe("ai_playbook_versions");
+    expect(consultas[1]!.filtros).toEqual({ organization_id: ORG, playbook_id: PB, id: V1 });
+  });
+
+  it("filtra organization_id nas DUAS consultas", async () => {
+    await lerPorId(PB);
+    for (const c of consultas) expect(c.filtros.organization_id).toBe(ORG);
+  });
+
+  it("nenhuma das consultas menciona slug", async () => {
+    await lerPorId(PB);
+    for (const c of consultas) expect(Object.keys(c.filtros)).not.toContain("slug");
+  });
+
+  it("a versão é buscada por id + playbook — nunca por ordenação", async () => {
+    await lerPorId(PB);
+    expect(Object.keys(consultas[1]!.filtros).sort()).toEqual([
+      "id",
+      "organization_id",
+      "playbook_id",
+    ]);
+  });
+
+  it("não pede a definição na consulta do ponteiro (o draft não é lido)", async () => {
+    await lerPorId(PB);
+    expect(consultas[0]!.colunas).not.toContain("draft");
+    expect(consultas[0]!.colunas).not.toContain("definition");
+  });
+});
+
+describe("carregarPlaybookPublicadoPorId — isolamento entre organizações", () => {
+  it("o UUID de um playbook de outra organização não é alcançado", async () => {
+    // A linha EXISTE na fixtura — e é isto que torna o caso uma medição: o que
+    // a mantém fora é o filtro, não a ausência do dado. O id é chave primária
+    // global e não carrega tenant nenhum; sem o filtro, conhecer o UUID
+    // bastaria para ler a estratégia comercial da vizinha.
+    expect(tabelas.ai_playbooks.some((l) => l.id === PB_ALHEIO)).toBe(true);
+    expect(await lerPorId(PB_ALHEIO, ORG)).toEqual({ tipo: "missing", motivo: "pointer_absent" });
+  });
+
+  it("o MESMO UUID, lido pela organização dona, é encontrado", async () => {
+    const r = await lerPorId(PB_ALHEIO, OUTRA_ORG);
+    // O par com o caso acima é a prova: mesma chave, duas respostas, e a única
+    // diferença é a organização de quem perguntou.
+    expect((r as { tipo: string }).tipo).toBe("found");
+    expect((r as { publishedVersionId: string }).publishedVersionId).toBe(V_ALHEIA);
+  });
+
+  it("a versão de outra org não é servida nem quando o id é alcançado pelo ponteiro", async () => {
+    tabelas.ai_playbooks.push({
+      id: "pb-aponta-fora",
+      organization_id: ORG,
+      slug: "aponta_fora",
+      status: "published",
+      published_version_id: V_ALHEIA,
+    });
+    expect(await lerPorId("pb-aponta-fora")).toEqual({
+      tipo: "missing",
+      motivo: "version_row_missing",
+    });
+  });
+
+  it("uma versão de OUTRO playbook não é servida, mesmo na organização certa", async () => {
+    tabelas.ai_playbook_versions.push({
+      id: V_DO_VIZINHO,
+      organization_id: ORG,
+      playbook_id: PB_VIZINHO,
+      version_number: 5,
+      definition: { schema_version: 1 },
+      definition_sha256: "d".repeat(64),
+    });
+    tabelas.ai_playbooks.push({
+      id: "pb-ponteiro-cruzado",
+      organization_id: ORG,
+      slug: "cruzado",
+      status: "published",
+      published_version_id: V_DO_VIZINHO,
+    });
+    // Estado que o BANCO impede: a FK `ai_playbooks (id, published_version_id)
+    // -> ai_playbook_versions (playbook_id, id)` não o admite. Ele existe aqui
+    // só para medir que o filtro `playbook_id` é carga e não decoração — sem
+    // ele, esta leitura devolveria a definição do playbook vizinho.
+    expect(await lerPorId("pb-ponteiro-cruzado")).toEqual({
+      tipo: "missing",
+      motivo: "version_row_missing",
+    });
+  });
+});
+
+describe("carregarPlaybookPublicadoPorId — ausências, com os MESMOS nomes", () => {
+  it("pointer_absent quando o UUID não existe", async () => {
+    expect(await lerPorId("bbbbbbbb-bbbb-4bbb-8bbb-000000000099")).toEqual({
+      tipo: "missing",
+      motivo: "pointer_absent",
+    });
+  });
+
+  it("not_published quando o ponteiro é rascunho", async () => {
+    expect(await lerPorId("pb-draft")).toEqual({ tipo: "missing", motivo: "not_published" });
+  });
+
+  it("archived vence published_version_id preenchido", async () => {
+    expect(await lerPorId("pb-arq")).toEqual({ tipo: "missing", motivo: "archived" });
+  });
+
+  it("version_row_missing quando o ponteiro aponta para versão inexistente", async () => {
+    expect(await lerPorId("pb-orfao")).toEqual({ tipo: "missing", motivo: "version_row_missing" });
+  });
+
+  it("not_published quando published_version_id não é um id utilizável", async () => {
+    tabelas.ai_playbooks.push({
+      id: "pb-torto-id",
+      organization_id: ORG,
+      slug: "torto_id",
+      status: "published",
+      published_version_id: 42,
+    });
+    expect(await lerPorId("pb-torto-id")).toEqual({ tipo: "missing", motivo: "not_published" });
+  });
+
+  it("ausência NUNCA dispara a segunda consulta", async () => {
+    await lerPorId("pb-draft");
+    expect(consultas).toHaveLength(1);
+  });
+});
+
+describe("carregarPlaybookPublicadoPorId — erro de banco, com o estágio nomeado", () => {
+  it("erro no ponteiro é database_error/pointer e não consulta a versão", async () => {
+    erros.ai_playbooks = "conexão caiu";
+    expect(await lerPorId(PB)).toEqual({
+      tipo: "database_error",
+      etapa: "pointer",
+      mensagem: "conexão caiu",
+    });
+    expect(consultas).toHaveLength(1);
+  });
+
+  it("erro na versão é database_error/version", async () => {
+    erros.ai_playbook_versions = "timeout";
+    expect(await lerPorId(PB)).toEqual({
+      tipo: "database_error",
+      etapa: "version",
+      mensagem: "timeout",
+    });
+  });
+
+  it("nenhum caso lança — quem chama recebe a lista, não uma exceção", async () => {
+    erros.ai_playbooks = "boom";
+    await expect(lerPorId(PB)).resolves.toBeDefined();
   });
 });

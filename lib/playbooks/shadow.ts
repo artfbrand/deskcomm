@@ -66,7 +66,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalHash } from "@/lib/agent-engine/agent/tool-breaker";
 import { logger } from "@/lib/logger";
 
-import { carregarPlaybookPublicado, type MotivoDeAusencia } from "./carregador";
+import {
+  carregarPlaybookPublicado,
+  carregarPlaybookPublicadoPorId,
+  type MotivoDeAusencia,
+} from "./carregador";
 import { validarDefinicao } from "./definicao";
 
 // ─── Contrato ────────────────────────────────────────────────────────────────
@@ -83,12 +87,42 @@ export type PlaybookShadowReason =
 
 export type PlaybookShadowSkip = "throttled" | "runtime_sem_playbook" | "database_error";
 
+/**
+ * COMO o playbook persistido foi encontrado — e, por consequência, de qual
+ * binding a observação nasceu.
+ *
+ *   por: "id"    o ponteiro real (`ai_playbooks.id`), vindo de um binding
+ *                persistido. É a identidade definitiva.
+ *   por: "slug"  a identidade lógica. Existe enquanto houver instalação sem
+ *                binding persistido; some quando o legado sair.
+ *
+ * O slug NÃO participa da busca por id: quem já tem o UUID não volta ao slug
+ * para chegar à linha.
+ */
+export type IdentidadeDoShadow =
+  | { por: "id"; playbookId: string }
+  | { por: "slug"; slug: string };
+
+/** De qual binding a observação nasceu. Deriva da identidade, nunca é passado. */
+export type OrigemDoBindingObservado = "persistido" | "legado";
+
 export interface PlaybookShadowObservation {
   outcome: "observed";
   status: PlaybookShadowStatus;
   reason: PlaybookShadowReason;
   organization_id: string;
-  slug: string;
+  /**
+   * `persistido` quando a busca foi pelo ponteiro; `legado` quando foi pelo
+   * slug. É o campo que torna a migração CONTÁVEL em vez de suposta: dá para
+   * ver quantas instalações já observam pelo binding novo.
+   */
+  binding_source: OrigemDoBindingObservado;
+  /**
+   * `null` na busca por id quando a linha não foi encontrada — ali o slug não
+   * é conhecido antes de ler, e inventá-lo seria a tradução que esta fase
+   * existe para não fazer. Quando a linha existe, é o slug DELA.
+   */
+  slug: string | null;
   /** O id que o funil grava hoje (`afb_comercial_v1`) — o rastro do binding em vigor. */
   registry_playbook_id: string;
   playbook_id: string | null;
@@ -114,8 +148,8 @@ export interface EntradaDoShadow {
   client: SupabaseClient;
   /** Da sessão validada, nunca do corpo do pedido. */
   organizationId: string;
-  /** A identidade persistida dentro da organização. */
-  slug: string;
+  /** Por onde procurar o playbook persistido — ponteiro ou slug. */
+  identidade: IdentidadeDoShadow;
   registryPlaybookId: string;
   /**
    * O hash canônico do que o CÓDIGO diz, sob demanda. É thunk, e não valor,
@@ -219,7 +253,15 @@ function avaliarVersao(bruto: { versionNumber: unknown; definition: unknown; def
  */
 export async function observarPlaybookEmShadow(entrada: EntradaDoShadow): Promise<PlaybookShadowResult> {
   const inicio = Date.now();
-  const chave = `${entrada.organizationId}:${entrada.slug}`;
+  const id = entrada.identidade;
+  // A chave da cadência carrega o TIPO da identidade, e não só o valor: sem
+  // isso, uma instalação que passa do slug para o ponteiro herdaria a janela
+  // da identidade antiga e ficaria até 10 min sem a primeira observação pelo
+  // binding novo — justamente a que se quer ver.
+  const chave =
+    id.por === "id"
+      ? `${entrada.organizationId}:id:${id.playbookId}`
+      : `${entrada.organizationId}:slug:${id.slug}`;
 
   const ultima = ultimaObservacaoPor.get(chave);
   if (ultima !== undefined && inicio - ultima < JANELA_DE_OBSERVACAO_MS) {
@@ -239,16 +281,24 @@ export async function observarPlaybookEmShadow(entrada: EntradaDoShadow): Promis
 
     const base = {
       organization_id: entrada.organizationId,
-      slug: entrada.slug,
+      binding_source: (id.por === "id" ? "persistido" : "legado") as OrigemDoBindingObservado,
+      // Na busca por id o slug só é conhecido depois de ler a linha.
+      slug: id.por === "slug" ? id.slug : null,
       registry_playbook_id: entrada.registryPlaybookId,
       sha_registry: shaRegistry,
-    } as const;
+    };
 
     // O ponteiro é SEMPRE relido: ele é a única peça mutável do par, e publicar
     // é movê-lo. Um cache dele serviria a versão anterior a quem acabou de
     // publicar — e não pouparia nada, porque só se lê aqui uma vez a cada
     // janela de cadência.
-    const leitura = await carregarPlaybookPublicado(entrada.client, entrada.organizationId, entrada.slug);
+    //
+    // Duas portas, um resultado: o ponteiro quando há binding persistido, o
+    // slug enquanto houver legado. Nenhuma das duas consulta a outra.
+    const leitura =
+      id.por === "id"
+        ? await carregarPlaybookPublicadoPorId(entrada.client, entrada.organizationId, id.playbookId)
+        : await carregarPlaybookPublicado(entrada.client, entrada.organizationId, id.slug);
 
     if (leitura.tipo === "database_error") {
       logger.warn("playbook.shadow", {
@@ -256,7 +306,8 @@ export async function observarPlaybookEmShadow(entrada: EntradaDoShadow): Promis
         reason: "database_error",
         etapa: leitura.etapa,
         organization_id: entrada.organizationId,
-        slug: entrada.slug,
+        binding_source: base.binding_source,
+        slug: base.slug,
         mensagem: leitura.mensagem,
       });
       return { outcome: "not_observed", reason: "database_error" };
@@ -285,12 +336,20 @@ export async function observarPlaybookEmShadow(entrada: EntradaDoShadow): Promis
     }
 
     return publicar(
-      montar(base, avaliada, leitura.playbookId, leitura.publishedVersionId, Date.now() - inicio),
+      montar(
+        // O slug sai da LINHA lida, não da entrada: na busca por id é a única
+        // forma de conhecê-lo, e na busca por slug é o mesmo valor.
+        { ...base, slug: leitura.slug },
+        avaliada,
+        leitura.playbookId,
+        leitura.publishedVersionId,
+        Date.now() - inicio,
+      ),
     );
   } catch (e) {
     logger.error("playbook.shadow.falhou", {
       organization_id: entrada.organizationId,
-      slug: entrada.slug,
+      binding_source: id.por === "id" ? "persistido" : "legado",
       erro: e instanceof Error ? e.message : String(e),
     });
     return { outcome: "not_observed", reason: "database_error" };
@@ -299,7 +358,13 @@ export async function observarPlaybookEmShadow(entrada: EntradaDoShadow): Promis
 
 /** A precedência, e só ela. Função pura: mesmos hashes ⇒ mesmo status. */
 function montar(
-  base: { organization_id: string; slug: string; registry_playbook_id: string; sha_registry: string },
+  base: {
+    organization_id: string;
+    binding_source: OrigemDoBindingObservado;
+    slug: string | null;
+    registry_playbook_id: string;
+    sha_registry: string;
+  },
   a: VersaoAvaliada,
   playbookId: string,
   versionId: string,

@@ -23533,6 +23533,50 @@ revoke all on function public.fn_publish_ai_playbook_version(uuid, uuid, jsonb, 
 grant execute on function public.fn_publish_ai_playbook_version(uuid, uuid, jsonb, text, uuid, text)
   to service_role;
 
+-- ---- binding de playbook no funil (migration 0234) ----
+--
+-- `crm_pipelines.ai_playbook_id` — o ponteiro do funil para `ai_playbooks.id`.
+-- Sem leitor, sem escritor, sem backfill: a coluna nasce NULL em toda linha, e
+-- NULL é o estado normal durante a compatibilidade (o runtime legado segue
+-- resolvendo o playbook por `settings.modulos.copiloto_comercial.playbook_id`,
+-- que guarda id de registry em código, não ponteiro de linha).
+--
+-- O tenant é garantido pela FK COMPOSTA, não pela aplicação: a primeira coluna
+-- do par é o `organization_id` do próprio funil, então vincular um funil da
+-- org A a um playbook da org B é recusado pelo banco (23503).
+--
+-- `on delete set null (ai_playbook_id)` tem a lista de colunas por necessidade,
+-- não por estilo: `set null` sem lista nulificaria também `organization_id`,
+-- que é `not null`, e o delete falharia com 23502. É sintaxe PostgreSQL 15+, e
+-- o pg15 é o piso declarado deste baseline.
+--
+-- Vem DEPOIS do bloco da 0233 neste arquivo de propósito: `ai_playbooks` é o
+-- alvo da FK e precisa existir antes. Racional completo no cabeçalho da
+-- migration 0234.
+
+alter table public.crm_pipelines
+  add column if not exists ai_playbook_id uuid;
+
+comment on column public.crm_pipelines.ai_playbook_id is
+  'Binding PERSISTIDO do playbook deste funil: aponta para public.ai_playbooks.id '
+  '(migration 0233). NULL significa ausência de binding persistido — é o estado '
+  'normal e não um defeito. Durante a compatibilidade, o runtime legado continua '
+  'resolvendo o playbook por settings.modulos.copiloto_comercial.playbook_id, que '
+  'guarda um id de registry em código e não um ponteiro para linha. Tenant é '
+  'garantido pela FK composta (organization_id, ai_playbook_id), não pela aplicação.';
+
+do $$ begin
+  alter table public.crm_pipelines
+    add constraint crm_pipelines_ai_playbook_fkey
+    foreign key (organization_id, ai_playbook_id)
+    references public.ai_playbooks (organization_id, id)
+    on delete set null (ai_playbook_id);
+exception when duplicate_object then null; end $$;
+
+create index if not exists idx_crm_pipelines_ai_playbook
+  on public.crm_pipelines (ai_playbook_id)
+  where ai_playbook_id is not null;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

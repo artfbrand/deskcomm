@@ -33,7 +33,12 @@
 import { getPlaybook } from "@/lib/afb/playbooks/registry";
 import type { ContextoDoCopiloto } from "@/lib/afb/copiloto/contrato";
 import { deRegistryParaDefinicao } from "@/lib/playbooks/adaptador-afb";
-import { observarPlaybookEmShadow, type PlaybookShadowResult } from "@/lib/playbooks/shadow";
+import {
+  observarPlaybookEmShadow,
+  type IdentidadeDoShadow,
+  type PlaybookShadowResult,
+} from "@/lib/playbooks/shadow";
+import type { BindingDoCopiloto } from "@/lib/afb/copiloto/binding";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -79,6 +84,34 @@ export function identidadePersistidaDoPlaybook(
   return slug === undefined ? null : { registryPlaybookId: playbookId, slug };
 }
 
+/**
+ * O binding do funil → por onde o shadow procura o playbook PERSISTIDO.
+ *
+ *   persistido  o ponteiro, direto. O mapa de slugs NÃO é consultado: quem já
+ *               tem o UUID não volta ao slug para chegar à linha.
+ *   legado      o caminho da transição — id do registry → slug → loader por
+ *               slug. É o único lugar onde `SLUG_PERSISTIDO_POR_ID_DO_REGISTRY`
+ *               ainda vive, e ele morre quando o legado sair.
+ *   ausente     nada a observar. Inclui o caso do D.3 em que a coluna traz
+ *               valor ilegível: ali `lerBindingDoCopiloto` já decidiu NÃO cair
+ *               para o legado, e repetir a decisão aqui a duplicaria.
+ *
+ * `null` não é falha: é ausência de PERGUNTA, e vira `runtime_sem_playbook`.
+ */
+export function identidadeDoShadowPeloBinding(
+  binding: BindingDoCopiloto,
+  registryPlaybookId: string,
+): IdentidadeDoShadow | null {
+  if (binding.origem === "persistido") {
+    return { por: "id", playbookId: binding.aiPlaybookId };
+  }
+  if (binding.origem === "legado") {
+    const identidade = identidadePersistidaDoPlaybook(registryPlaybookId);
+    return identidade === null ? null : { por: "slug", slug: identidade.slug };
+  }
+  return null;
+}
+
 export interface EntradaDoShadowAFB {
   /** Cliente de SESSÃO (RLS), criado na rota antes da resposta. Nunca admin. */
   client: SupabaseClient;
@@ -86,6 +119,12 @@ export interface EntradaDoShadowAFB {
   organizationId: string;
   /** O que o runtime JÁ resolveu — `contexto.pipeline.playbook_id`. */
   playbookId: string | null | undefined;
+  /**
+   * O binding que o funil declara, lido por `lerBindingDoCopiloto` durante o
+   * carregamento do contexto. Ele decide POR ONDE o persistido é procurado —
+   * nunca o que o Copiloto responde.
+   */
+  binding: BindingDoCopiloto;
 }
 
 /**
@@ -101,17 +140,22 @@ export interface EntradaDoShadowAFB {
 export async function observarPlaybookDoCopilotoAFB(
   entrada: EntradaDoShadowAFB,
 ): Promise<PlaybookShadowResult> {
-  const identidade = identidadePersistidaDoPlaybook(entrada.playbookId);
-  if (!identidade) return { outcome: "not_observed", reason: "runtime_sem_playbook" };
+  // O que o runtime EXECUTOU continua vindo do registry, sempre. O binding só
+  // escolhe onde procurar o lado persistido da comparação.
+  const registryPlaybookId = entrada.playbookId;
+  const playbook = typeof registryPlaybookId === "string" ? getPlaybook(registryPlaybookId) : null;
+  if (playbook === null || typeof registryPlaybookId !== "string") {
+    return { outcome: "not_observed", reason: "runtime_sem_playbook" };
+  }
 
-  const playbook = getPlaybook(identidade.registryPlaybookId);
-  if (playbook === null) return { outcome: "not_observed", reason: "runtime_sem_playbook" };
+  const identidade = identidadeDoShadowPeloBinding(entrada.binding, registryPlaybookId);
+  if (identidade === null) return { outcome: "not_observed", reason: "runtime_sem_playbook" };
 
   return observarPlaybookEmShadow({
     client: entrada.client,
     organizationId: entrada.organizationId,
-    slug: identidade.slug,
-    registryPlaybookId: identidade.registryPlaybookId,
+    identidade,
+    registryPlaybookId,
     // Thunk: derivar a definição do registry custa ~55 KB de JSON, e sob
     // cadência a observação nem acontece. O shadow memoiza o resultado.
     shaDoRegistry: () => deRegistryParaDefinicao(playbook).sha256,

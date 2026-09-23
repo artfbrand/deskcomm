@@ -11,7 +11,7 @@
       "O resultado do shadow (PlaybookShadowResult) NÃO entra no contrato HTTP e nunca chega ao navegador: ele vai para o log e é descartado.",
       "Nenhum efeito comercial decorre da observação: nada é enviado, agendado, movido de etapa ou gravado.",
       "A observação roda DEPOIS do envio da resposta (after() do Next) e é fail-open: qualquer falha — leitura, validação, hash, log, agendamento — deixa a resposta do copiloto intacta.",
-      "NÃO existe binding persistido: o funil continua apontando para o id legado do registry (afb_comercial_v1). A troca de binding é fase posterior e explícita."
+      "O binding persistido EXISTE (crm_pipelines.ai_playbook_id, migration 0234) e é PRODUZIDO pelo provisionamento, mas continua sem executar nada: ele só decide por onde o SHADOW procura o playbook persistido. O funil segue apontando para o id legado do registry (afb_comercial_v1), e o registry segue sendo a autoridade operacional."
     ]
   },
   "lanes": [
@@ -68,6 +68,12 @@
       "lane": "config",
       "label": "crm_pipelines.settings",
       "type": "table"
+    },
+    {
+      "id": "binding",
+      "lane": "config",
+      "type": "table",
+      "label": "crm_pipelines.ai_playbook_id — ponteiro, FK composta (0234)"
     },
     {
       "id": "credential",
@@ -151,7 +157,7 @@
       "id": "shadow_afb",
       "lane": "shadow",
       "type": "service",
-      "label": "shadow-afb — afb_comercial_v1 → slug afb_comercial"
+      "label": "shadow-afb — escolhe a porta pelo binding; nunca traduz UUID→slug"
     },
     {
       "id": "shadow_generico",
@@ -393,7 +399,7 @@
       "id": "e32",
       "from": "shadow_afb",
       "to": "shadow_generico",
-      "label": "identidade (organization_id, slug) + sha do registry"
+      "label": "identidade: por id (binding) OU por slug (legado) + sha do registry"
     },
     {
       "id": "e33",
@@ -405,7 +411,7 @@
       "id": "e34",
       "from": "carregador",
       "to": "ai_playbooks",
-      "label": "SELECT por (organization_id, slug)"
+      "label": "SELECT por (organization_id, id) no persistido; por (organization_id, slug) no legado"
     },
     {
       "id": "e35",
@@ -460,6 +466,24 @@
       "from": "carregador",
       "to": "log_shadow",
       "label": "not_observed/database_error — fail-open"
+    },
+    {
+      "id": "e44",
+      "from": "cli",
+      "to": "binding",
+      "label": "provisionamento grava o UUID da MESMA execução (D.4)"
+    },
+    {
+      "id": "e45",
+      "from": "binding",
+      "to": "ai_playbooks",
+      "label": "FK (organization_id, ai_playbook_id) — tenant garantido pelo banco"
+    },
+    {
+      "id": "e46",
+      "from": "binding",
+      "to": "shadow_afb",
+      "label": "origem persistido → identidade por id; ausente → legado por slug (D.5)"
     }
   ]
 }

@@ -209,7 +209,19 @@ export interface AfbProvisioningRepository {
   ): Promise<PlaybookUpsertResult>;
   /** Adota um registro equivalente: grava SÓ a marca de propriedade, preservando ids e versões. */
   adoptPlaybook(organizationId: string, playbookId: string): Promise<PlaybookUpsertResult>;
-  configurePipeline(organizationId: string, pipelineId: string): Promise<boolean>;
+  /**
+   * Grava o módulo do Copiloto no funil e, quando houver, o binding persistido.
+   *
+   * `aiPlaybookId` é `null` para "NÃO mexa na coluna" — nunca para "limpe".
+   * Limpar seria o provisionador desfazer um vínculo que uma pessoa pode ter
+   * feito na tela, e a postura desta peça é a mesma do `playbookPlan`: em
+   * dúvida, não passa por cima.
+   */
+  configurePipeline(
+    organizationId: string,
+    pipelineId: string,
+    aiPlaybookId: string | null,
+  ): Promise<boolean>;
   upsertKnowledgeSource(
     organizationId: string,
     source: DocumentoAfbCarregado,
@@ -261,6 +273,16 @@ export interface ProvisioningReport {
     sha256: string;
     action: AcaoDoPlaybook;
     reason: string;
+    /**
+     * O UUID que o funil receberá em `crm_pipelines.ai_playbook_id` (migration
+     * 0234). `null` em dois casos DIFERENTES, e o `action` ao lado os separa:
+     * em `create` o id ainda não existe (ele nasce no banco, nesta execução);
+     * em `conflict` não haverá binding nenhum.
+     *
+     * No dry-run isto é o que permite conferir QUAL playbook o funil passaria
+     * a apontar, antes de qualquer escrita.
+     */
+    pipelineBindingId: string | null;
   };
   changes: string[];
   warnings: string[];
@@ -522,6 +544,37 @@ export function playbookPlan(
   return { action: "conflict", reason: "existe um playbook com este slug que não pertence ao bootstrap" };
 }
 
+/**
+ * QUAL UUID o funil deve passar a apontar — a partir do plano, não do nome.
+ *
+ * O id vem sempre do BANCO, por um de dois caminhos, e nunca de uma busca por
+ * slug dentro do `configurePipeline`:
+ *
+ *   create / publish / adopt  → o id devolvido pela escrita desta execução.
+ *   unchanged                 → o id que o snapshot já trouxe (não houve
+ *                               escrita: o playbook já estava correto).
+ *   conflict                  → `null`. Existe um playbook com o nosso slug
+ *                               que NÃO é o nosso, ou que divergiu. Apontar o
+ *                               funil para ele seria o provisionador escolher
+ *                               por cima de uma publicação humana — a mesma
+ *                               coisa que `playbookPlan` recusa fazer.
+ *
+ * `null` significa "não mexa na coluna", nunca "limpe a coluna".
+ *
+ * Por que `aplicado` vem antes de `existente`: no `adopt` os dois são o mesmo
+ * id (adotar preserva `ai_playbooks.id`), e no `create` só o primeiro existe.
+ * Preferir o que a escrita acabou de devolver é o que garante que o UUID
+ * gravado é o da MESMA execução, e não um lido antes de qualquer coisa mudar.
+ */
+export function uuidDoBindingPersistido(
+  acao: AcaoDoPlaybook,
+  existente: ExistingPlaybookRef | null,
+  aplicado: PlaybookUpsertResult | null,
+): string | null {
+  if (acao === "conflict") return null;
+  return aplicado?.id ?? existente?.id ?? null;
+}
+
 export interface ProvisioningDependencies {
   loadDocuments?: () => Promise<DocumentosAfbCarregados>;
   /** A definição persistida vem SEMPRE do adaptador; injetável só para teste. */
@@ -604,8 +657,23 @@ export async function provisionAfbCommercialOutbound(
     !knowledge.some((entry) => entry.action === "conflict") &&
     snapshot.memoryEntriesWithTitle <= 1;
 
+  // O binding que o funil receberá, calculado ANTES de qualquer escrita: é o
+  // que o dry-run publica. No `apply` ele é recalculado depois da escrita do
+  // playbook, porque só então o id do `create` existe.
+  const bindingPlanejado = uuidDoBindingPersistido(playbookPlano.action, snapshot.playbook, null);
+
   const changes = [
     ...(pipeline ? [`configurar playbook ${AFB_PLAYBOOK_ID} no funil ${pipeline.id}`] : []),
+    // Linha própria, e não um adendo à de cima: o legado e o persistido são
+    // dois vínculos que convivem nesta fase, e juntá-los na mesma frase faria
+    // parecer que um substituiu o outro.
+    ...(pipeline && playbookPlano.action !== "conflict"
+      ? [
+          `vincular funil ${pipeline.id} ao playbook persistido ${
+            bindingPlanejado ?? "(id criado nesta execução)"
+          }`,
+        ]
+      : []),
     ...knowledge.map((entry) => `${entry.action}: conhecimento ${entry.name}`),
     `${memoryAction}: memória ${AFB_MEMORY_TITLE}`,
     `${playbookPlano.action}: playbook ${AFB_PLAYBOOK_PERSISTIDO.name}`,
@@ -647,6 +715,7 @@ export async function provisionAfbCommercialOutbound(
       sha256: playbookDefinicao.sha256,
       action: playbookPlano.action,
       reason: playbookPlano.reason,
+      pipelineBindingId: bindingPlanejado,
     },
     changes,
     warnings,
@@ -655,10 +724,11 @@ export async function provisionAfbCommercialOutbound(
 
   if (!options.apply) return report;
 
+  // O funil é configurado DEPOIS do playbook persistido (mais abaixo), e não
+  // aqui, onde esta chamada ficava. O motivo é o `create`: o UUID do binding só
+  // existe depois do INSERT, então configurar antes só poderia gravar o módulo
+  // legado — e o binding ficaria para "a próxima execução", em silêncio.
   let pipelineChanged = false;
-  if (pipeline) {
-    pipelineChanged = await repository.configurePipeline(snapshot.organization.id, pipeline.id);
-  }
 
   const sources: UpsertResult[] = [];
   if (!knowledge.some((entry) => entry.action === "conflict")) {
@@ -740,6 +810,24 @@ export async function provisionAfbCommercialOutbound(
     });
   } else if (playbookPlano.action === "adopt" && snapshot.playbook) {
     playbookAplicado = await repository.adoptPlaybook(snapshot.organization.id, snapshot.playbook.id);
+  }
+
+  // ─── O funil: módulo legado + binding persistido, na MESMA escrita ────────
+  //
+  // O legado continua sendo gravado exatamente como antes
+  // (`buildAfbPipelineSettings`, dentro do repositório); o que muda é que agora
+  // vai junto o UUID desta execução.
+  //
+  // Se esta chamada falhar depois de o playbook ter sido criado, a instalação
+  // fica com playbook sem binding — e a execução seguinte vê `unchanged` (mesmo
+  // sha), recalcula o mesmo id pelo snapshot e grava. Não há estado do qual não
+  // se saia repetindo o comando.
+  if (pipeline) {
+    pipelineChanged = await repository.configurePipeline(
+      snapshot.organization.id,
+      pipeline.id,
+      uuidDoBindingPersistido(playbookPlano.action, snapshot.playbook, playbookAplicado),
+    );
   }
 
   await repository.recordAudit(snapshot.organization.id, {
