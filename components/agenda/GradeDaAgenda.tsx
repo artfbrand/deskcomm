@@ -11,9 +11,10 @@ import {
   format,
   isSameDay,
   isSameMonth,
-  startOfMonth,
   startOfWeek,
 } from "date-fns";
+
+import { semanasDaVisaoDeMes } from "@/lib/agenda/janela-do-mes";
 
 import {
   PASSO_DA_CELULA_MIN,
@@ -636,16 +637,11 @@ function VisaoDeMes({
 }) {
   const t = useT();
   const localeDaData = useLocaleDeData();
-  const primeiro = startOfWeek(startOfMonth(ancora), { weekStartsOn: 0 });
-  // SEIS semanas sempre, mesmo quando o mês cabe em cinco.
-  //
-  // Um mês que ocupa 5 linhas e outro que ocupa 6 fariam a célula mudar de
-  // altura ao virar o mês — a grade "pula" e quem estava olhando um dia perde
-  // a referência. O custo é uma linha de dias do mês seguinte, que já nasce
-  // esmaecida.
-  const semanas: Date[][] = Array.from({ length: 6 }, (_, s) =>
-    Array.from({ length: 7 }, (_, d) => addDays(primeiro, s * 7 + d)),
-  );
+  // As seis semanas vêm de `lib/agenda/janela-do-mes.ts`, que é o MESMO módulo
+  // que o recorte de busca usa. Enquanto a conta vivia aqui e a busca pedia o
+  // mês civil, a grade desenhava células dos meses vizinhos cujos dados nunca
+  // eram buscados — o racional inteiro está no cabeçalho daquele arquivo.
+  const semanas = semanasDaVisaoDeMes(ancora);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
