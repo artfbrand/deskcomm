@@ -6,7 +6,9 @@ import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
 import { useT } from "@/hooks/i18n/useT";
 
-import { addDays, endOfMonth, format, startOfDay, startOfMonth, startOfWeek } from "date-fns";
+import { addDays, format, startOfDay, startOfWeek } from "date-fns";
+
+import { janelaVisivelDoMes } from "@/lib/agenda/janela-do-mes";
 import * as React from "react";
 
 import { AvisoDaConexaoGoogle } from "./_components/AvisoDaConexaoGoogle";
@@ -202,14 +204,17 @@ export function AgendaClient({
   // Instante ISO, nunca o filtro `dia`: o cabeçalho do hook mede por que
   // (`dia=` corta em UTC e some com o compromisso das 22h no fuso de São Paulo).
   const recorteDaGrade = React.useMemo(() => {
+    // A visão Mês pede a janela VISÍVEL (seis semanas), não o mês civil. A
+    // diferença não é cosmética: a grade derrama dias dos meses vizinhos, e
+    // pedir `startOfMonth`→`endOfMonth` desenhava essas células sem nunca
+    // buscar o que cai nelas. Ver `lib/agenda/janela-do-mes.ts`.
+    if (visao === "mes") {
+      const { inicio, fim } = janelaVisivelDoMes(ancora);
+      return { de: inicio.toISOString(), ate: fim.toISOString() };
+    }
     const inicio =
-      visao === "mes"
-        ? startOfMonth(ancora)
-        : visao === "semana"
-          ? startOfWeek(ancora, { weekStartsOn: 0 })
-          : startOfDay(ancora);
-    const fim =
-      visao === "mes" ? addDays(endOfMonth(ancora), 1) : addDays(inicio, visao === "semana" ? 7 : 1);
+      visao === "semana" ? startOfWeek(ancora, { weekStartsOn: 0 }) : startOfDay(ancora);
+    const fim = addDays(inicio, visao === "semana" ? 7 : 1);
     return { de: inicio.toISOString(), ate: fim.toISOString() };
   }, [visao, ancora]);
 
