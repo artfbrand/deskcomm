@@ -283,7 +283,7 @@ test("testa sem enviar, pausa preserva publicação e sugestão só sai pelo com
     expect(channel.bodies).toHaveLength(0);
 
     await panel(page).getByRole("button", { name: "Usar no composer" }).click();
-    const composer = page.getByLabel("Mensagem");
+    const composer = page.getByRole("textbox", { name: "Mensagem", exact: true });
     await expect(composer).toHaveValue(/\S+/);
     expect(channel.bodies).toHaveLength(0);
     expect(approvals).toBe(0);
