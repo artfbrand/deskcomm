@@ -3561,6 +3561,19 @@ async function executarTurnoDoAgente(
         ? pruneToolResults(turn.result.response.messages, deps.knobs.prune)
         : turn.result.response.messages;
 
+    // A prévia assistida só entrega um candidato humano: todos os guardrails do
+    // send_message já rodaram, mas não há checkpoint durável nem Operador a alimentar.
+    // Sandbox continua exercitando o fechamento completo, e o turno real continua
+    // persistindo o checkpoint antes de qualquer efeito operacional subsequente.
+    if (preview?.kind === 'assisted') {
+      if (preview.result.candidates.length === 0 && preview.result.impediments.length === 0)
+        preview.result.impediments.push({
+          code: 'no_candidate',
+          message: 'O agente não propôs uma resposta. Revise o cenário ou a configuração.',
+        });
+      return;
+    }
+
     // Fechamento imposto pelo runtime: 2ª chamada, mesma conversa, só o checkpoint.
     //
     // Também sob o handoff (o do turno inteiro, em `runAgentTurn`): o teto pode

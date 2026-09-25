@@ -67,11 +67,14 @@ pontos, e a proposta é generalizar o que ele faz.
 modelo pensou" e "o cliente recebeu".
 
 **2. O que não pode depender da memória do modelo é imposto pelo runtime.**
-O turno de fechamento (`purpose: 'checkpoint'`) roda **sempre**. O comentário do próprio arquivo
-diz o porquê, e é a frase que sustenta toda esta proposta:
+O turno de fechamento (`purpose: 'checkpoint'`) roda **sempre no turno operacional e no sandbox**.
+A prévia assistida não grava checkpoint nem dispara Operador: depois de validar o candidato pela
+mesma cadeia anterior a `send_message`, ela devolve o texto para revisão humana sem pagar um
+fechamento que não tem consumidor durável. O comentário do próprio arquivo diz o porquê do
+fechamento nos fluxos que o consomem, e é a frase que sustenta toda esta proposta:
 
 > *"tool `update_checkpoint` dependeria de o modelo lembrar de chamá-la; a chamada de fechamento
-> sempre acontece"*
+> sempre acontece no fluxo que cria checkpoint durável"*
 
 **3. O modelo DECLARA em linguagem de negócio; o código TRADUZ para operação.**
 `update_lead_state`: o modelo marca o avanço com evidência; a máquina de estados valida e o avanço

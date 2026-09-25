@@ -5,7 +5,7 @@ import { beforeAll, afterAll, it, expect, vi } from "vitest";
 import { seedGov } from "./gov-helpers";
 import { replyFixture } from "../support/autonomia-fixture";
 import { loadAgentVersionConfig } from "@/lib/agent-engine/agent/agent-config";
-import { runAgentPreview } from "@/lib/agent-engine/agent/inbound-turn";
+import { CHECKPOINT_INSTRUCTION, runAgentPreview } from "@/lib/agent-engine/agent/inbound-turn";
 import { generateReplyDraft } from "@/lib/agent-engine/agent/reply-drafts";
 import {
   scenarioContext,
@@ -205,7 +205,7 @@ it("sandbox percorre flush, compaction, RAG, loop e fechamento com zero mutaçã
     ).rows,
   ).toEqual([{ job_id: null }]);
 });
-it("assistência sob demanda instala fronteira original antes de ler checkpoint", async () => {
+it("assistência sob demanda usa a fronteira atual e fica pending sem fechamento", async () => {
   const f = await replyFixture(pool);
   await kb(f);
   const prompts: string[] = [],
@@ -242,12 +242,15 @@ it("assistência sob demanda instala fronteira original antes de ler checkpoint"
     ],
   );
 
-  await generateReplyDraft(pool, d, {
+  const draft = await generateReplyDraft(pool, d, {
     organizationId: f.org,
     conversationId: f.conversation,
     contactId: f.contact,
     channelId: f.channel,
   });
+  expect(draft.status).toBe("pending");
+  expect(draft.original_body).toBe("O atendimento começa às nove horas.");
   expect(JSON.stringify(prompts)).toContain("RESUMO DO ATENDIMENTO ATUAL");
   expect(JSON.stringify(prompts)).not.toContain("SENTINELA DE ATENDIMENTO ANTERIOR");
+  expect(JSON.stringify(prompts)).not.toContain(CHECKPOINT_INSTRUCTION);
 });
