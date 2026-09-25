@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useT } from "@/hooks/i18n/useT";
 type Draft = {
@@ -19,9 +18,12 @@ type Draft = {
 export function ReplyReviewPanel({
   conversationId,
   disabled,
+  onUseDraft,
 }: {
   conversationId: string;
   disabled?: boolean;
+  /** Retorna false quando o composer preservou texto humano já existente. */
+  onUseDraft: (text: string) => boolean;
 }) {
   const t = useT(),
     qc = useQueryClient(),
@@ -35,16 +37,17 @@ export function ReplyReviewPanel({
     refetchInterval: 4000,
     retry: false,
   });
-  const [edits, setEdits] = useState<Record<string, string>>({}),
-    [feedback, setFeedback] = useState(""),
+  const [feedback, setFeedback] = useState(""),
     [busy, setBusy] = useState(false),
+    [insertedDraftIds, setInsertedDraftIds] = useState<Set<string>>(() => new Set()),
     [notice, setNotice] = useState<{
       draftId: string;
       message: string;
       kind: "success" | "error";
     } | null>(null);
   const draft = query.data?.data.drafts[0];
-  const body = draft ? (edits[draft.id] ?? draft.edited_body ?? draft.original_body ?? "") : "";
+  const body = draft ? (draft.edited_body ?? draft.original_body ?? "") : "";
+  const inserted = !!draft && insertedDraftIds.has(draft.id);
   async function generate() {
     setNotice(null);
     setBusy(true);
@@ -91,6 +94,10 @@ export function ReplyReviewPanel({
       setBusy(false);
     }
   }
+  function useDraft() {
+    if (!draft || !body.trim() || !onUseDraft(body)) return;
+    setInsertedDraftIds((current) => new Set(current).add(draft.id));
+  }
   const statuses: Record<string, string> = {
     generating: "Preparando sugestão…",
     pending: "Sugestão para revisar",
@@ -108,7 +115,13 @@ export function ReplyReviewPanel({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">
-          {t(draft ? (statuses[draft.status] ?? "Assistência do agente") : "Assistência do agente")}
+          {t(
+            inserted
+              ? "Sugestão inserida no composer"
+              : draft
+                ? (statuses[draft.status] ?? "Assistência do agente")
+                : "Assistência do agente",
+          )}
         </p>
         <Button
           type="button"
@@ -123,18 +136,15 @@ export function ReplyReviewPanel({
       {draft && (
         <>
           <p className="text-xs text-muted-foreground">
-            {t(
-              "Aprovar envia somente este texto. Não altera dados, agenda ou a autonomia do agente.",
-            )}
+            {t("A sugestão entra no composer para você editar e enviar manualmente.")}
           </p>
           {body && (
-            <Textarea
+            <p
+              className="rounded-md border bg-background px-3 py-2 text-sm whitespace-pre-wrap"
               aria-label={t("Resposta sugerida")}
-              value={body}
-              onChange={(e) => setEdits({ ...edits, [draft.id]: e.target.value })}
-              disabled={disabled || busy || draft.status !== "pending"}
-              rows={3}
-            />
+            >
+              {body}
+            </p>
           )}
           {draft.proposals.length > 0 && (
             <details className="text-xs">
@@ -147,7 +157,7 @@ export function ReplyReviewPanel({
               </ul>
             </details>
           )}
-          {draft.status === "pending" && (
+          {draft.status === "pending" && !inserted && (
             <>
               <Input
                 aria-label={t("Feedback para a próxima sugestão")}
@@ -161,9 +171,9 @@ export function ReplyReviewPanel({
                   type="button"
                   size="sm"
                   disabled={disabled || busy || !body.trim()}
-                  onClick={() => decide("approve")}
+                  onClick={useDraft}
                 >
-                  {t("Aprovar e enviar")}
+                  {t("Usar no composer")}
                 </Button>
                 <Button
                   type="button"

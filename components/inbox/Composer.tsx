@@ -20,6 +20,7 @@ import { resolveSlash, TemplateMenu } from "@/components/inbox/composer/Template
 import { useCreateNote } from "@/hooks/inbox/useCreateNote";
 import { useMessageTemplates, type MessageTemplate } from "@/hooks/inbox/useMessageTemplates";
 import { X } from "lucide-react";
+import { toast } from "sonner";
 import { useSendMessage } from "@/hooks/inbox/useSendMessage";
 import { useUploadMedia } from "@/hooks/inbox/useUploadMedia";
 import { imagemDoClipboard } from "@/lib/inbox/clipboard-image";
@@ -104,6 +105,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  }
+
+  /**
+   * A sugestão do agente entra no MESMO estado que o atendente digita. Ela não
+   * aprova, não envia e não ganha caminho próprio: depois daqui só o submit
+   * manual do composer pode falar com o cliente.
+   *
+   * Texto humano nunca é substituído em silêncio. A pessoa escolhe se termina,
+   * envia ou limpa o que já começou antes de trazer a sugestão.
+   */
+  function usarSugestaoNoComposer(sugestao: string): boolean {
+    if (text.trim()) {
+      toast.info(
+        t("O composer já contém texto. Revise, envie ou limpe-o antes de usar a sugestão."),
+      );
+      return false;
+    }
+
+    setText(sugestao);
+    setMenuDismissed(true);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = sugestao.length;
+      autoresize();
+    });
+    return true;
   }
 
   function handleSubmit() {
@@ -205,7 +234,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         )}
       >
         {mode === "reply" && (
-          <ReplyReviewPanel conversationId={conversationId} disabled={isDisabled} />
+          <ReplyReviewPanel
+            conversationId={conversationId}
+            disabled={isDisabled}
+            onUseDraft={usarSugestaoNoComposer}
+          />
         )}
         <TemplateMenu
           open={menuOpen}

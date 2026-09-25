@@ -5,7 +5,6 @@ import pg from "pg";
 import { createClient } from "@supabase/supabase-js";
 import { test, expect, type Page, type TestInfo, type Locator } from "@playwright/test";
 import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
-import { createApprovedReplyHandler } from "../../lib/agent-engine/agent/approved-reply";
 import { seedPlatformPlaybook } from "../../lib/agent-engine/agent/playbook-seed";
 
 const credentials = credenciaisSupabaseDeTeste();
@@ -54,16 +53,14 @@ async function fixture(pool: pg.Pool) {
     webhook_secret_encrypted: "\\x00",
     metadata: { ai_gate: "allowlist" },
   });
-  const knobs = await db
-    .from("channel_knobs")
-    .insert({
-      organization_id: org,
-      channel_session_id: channel,
-      throttle_ms: 0,
-      jitter_max_ms: 0,
-      window_start_hour: 0,
-      window_end_hour: 24,
-    });
+  const knobs = await db.from("channel_knobs").insert({
+    organization_id: org,
+    channel_session_id: channel,
+    throttle_ms: 0,
+    jitter_max_ms: 0,
+    window_start_hour: 0,
+    window_end_hour: 24,
+  });
   if (knobs.error) throw knobs.error;
   const contact = await insert("contacts", {
     organization_id: org,
@@ -217,28 +214,6 @@ async function generate(page: Page) {
   await expect(panel(page).getByText("Sugestão para revisar", { exact: true })).toBeVisible();
   return (await r.json()).data.draft_id as string;
 }
-async function deliver(f: Fixture, draft: string, pool: pg.Pool) {
-  const { rows } = await pool.query(
-    "update job_queue j set status='running',locked_by='autonomia-browser',locked_at=clock_timestamp(),attempts=attempts+1 from ai_reply_drafts d where d.organization_id=$1 and d.id=$2 and j.organization_id=d.organization_id and j.id=d.send_job_id and j.status='pending' returning j.*,j.locked_at::text claim_acquired_at",
-    [f.org, draft],
-  );
-  expect(rows).toHaveLength(1);
-  // Only acquisition is fixture-controlled; the canonical consumer, ledger and HTTP execute.
-  await createApprovedReplyHandler({
-    crmCfg: { supabase: db },
-    log: { info() {}, warn() {}, error() {} },
-    sleep: async () => {},
-  })(rows[0], pool);
-  expect(
-    (
-      await pool.query("select status from ai_reply_drafts where organization_id=$1 and id=$2", [
-        f.org,
-        draft,
-      ])
-    ).rows[0].status,
-  ).toBe("sent");
-  return rows[0].id as string;
-}
 test.afterAll(async () => {
   for (const org of orgs) {
     const r = await db.from("organizations").delete().eq("id", org);
@@ -249,7 +224,7 @@ test.afterAll(async () => {
     if (r.error) throw r.error;
   }
 });
-test("testa sem enviar, pausa preserva publicação e duas aprovações entregam texto revisado sem silenciar assistência", async ({
+test("testa sem enviar, pausa preserva publicação e sugestão só sai pelo composer manual", async ({
   page,
 }, info) => {
   const pool = new pg.Pool({ connectionString: credentials.dbUrl, max: 5 }),
@@ -300,69 +275,42 @@ test("testa sem enviar, pausa preserva publicação e duas aprovações entregam
       ).rows[0],
     ).toMatchObject({ published_version_id: f.version, paused_at: expect.any(Date) });
     await page.goto(`/app/inbox/${f.conversation}`);
-    const first = await generate(page);
+    let approvals = 0;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.url().includes("/api/v1/ai/replies/")) approvals++;
+    });
+    await generate(page);
     expect(channel.bodies).toHaveLength(0);
-    await panel(page)
-      .getByLabel("Resposta sugerida")
-      .fill("Maria, confirmei as informações e posso ajudar por aqui.");
-    await panel(page)
-      .getByLabel("Feedback para a próxima sugestão")
-      .fill("Usar linguagem curta e clara.");
-    await capture(page, panel(page), info, "revisao-desktop");
-    const approved = page.waitForResponse(
-      (r) => r.url().endsWith(`/ai/replies/${first}`) && r.request().method() === "POST",
+
+    await panel(page).getByRole("button", { name: "Usar no composer" }).click();
+    const composer = page.getByRole("textbox", { name: "Mensagem", exact: true });
+    await expect(composer).toHaveValue(/\S+/);
+    expect(channel.bodies).toHaveLength(0);
+    expect(approvals).toBe(0);
+    await capture(page, panel(page), info, "sugestao-no-composer-desktop");
+
+    await composer.fill("Maria, confirmei as informações e posso ajudar por aqui.");
+    const sent = page.waitForResponse(
+      (r) => r.url().endsWith("/api/v1/messages") && r.request().method() === "POST",
     );
-    await panel(page).getByRole("button", { name: "Aprovar e enviar" }).click();
-    expect((await approved).status()).toBe(200);
-    const firstJob = await deliver(f, first, pool);
+    await page.getByRole("button", { name: "Enviar", exact: true }).click();
+    expect((await sent).status()).toBe(201);
     expect(channel.bodies).toHaveLength(1);
     expect(channel.bodies[0]).toMatchObject({
       session: f.sessionName,
       chatId: "15551234567@c.us",
       text: "Maria, confirmei as informações e posso ajudar por aqui.",
     });
-    await expect(panel(page).getByText("Resposta aprovada enviada", { exact: true })).toBeVisible();
-    await inbound(f, "Obrigada, pode continuar");
-    const second = await generate(page);
-    await panel(page)
-      .getByLabel("Resposta sugerida")
-      .fill("Claro, Maria. Qual informação você precisa agora?");
-    const approvedAgain = page.waitForResponse(
-      (r) => r.url().endsWith(`/ai/replies/${second}`) && r.request().method() === "POST",
-    );
-    await panel(page).getByRole("button", { name: "Aprovar e enviar" }).click();
-    expect((await approvedAgain).status()).toBe(200);
-    expect(await deliver(f, second, pool)).not.toBe(firstJob);
-    expect(channel.bodies).toHaveLength(2);
-    expect(
-      (
-        await pool.query(
-          "select bot_silenced_until::text,assigned_to_user_id from conversations where organization_id=$1 and id=$2",
-          [f.org, f.conversation],
-        )
-      ).rows[0],
-    ).toEqual({ bot_silenced_until: "infinity", assigned_to_user_id: f.user });
-    expect(
-      (
-        await pool.query(
-          "select force_human,ai_authorized_at from contacts where organization_id=$1 and id=$2",
-          [f.org, f.contact],
-        )
-      ).rows[0],
-    ).toEqual({ force_human: true, ai_authorized_at: null });
-    // Uma nova entrada cria outra candidata; repetir no mesmo contexto devolve o recibo já enviado.
+    expect(approvals).toBe(0);
+    // Uma nova entrada invalida a candidata: ela não pode ser inserida depois
+    // que o contexto da conversa mudou.
     await inbound(f, "Tenho mais uma pergunta sobre o atendimento");
-    const third = await generate(page);
-    expect(third).not.toBe(second);
+    await generate(page);
     await inbound(f, "O assunto mudou");
     await expect(
       panel(page).getByText("Sugestão obsoleta: a conversa mudou", { exact: true }),
     ).toBeVisible();
-    await expect(panel(page).getByRole("button", { name: "Aprovar e enviar" })).toHaveCount(0);
-    await expect(panel(page).getByText("Resposta aprovada. Acompanhe o envio aqui.", { exact: true })).toHaveCount(0);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await capture(page, panel(page), info, "obsoleta-mobile");
-    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect(panel(page).getByRole("button", { name: "Usar no composer" })).toHaveCount(0);
     await page.goto(`/app/ai/agents/${f.agent}`);
     await page.getByLabel("Modo de operação").selectOption("automatic");
     await expect(page.getByLabel("Modo de operação")).toHaveValue("automatic");
@@ -384,7 +332,7 @@ test("testa sem enviar, pausa preserva publicação e duas aprovações entregam
       info,
       "automatico-desktop",
     );
-    expect(channel.bodies).toHaveLength(2);
+    expect(channel.bodies).toHaveLength(1);
   } finally {
     await page.close();
     await channel.close();
