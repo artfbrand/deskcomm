@@ -15,6 +15,11 @@ type Draft = {
   error_code: string | null;
   proposals: Array<{ tool: string; arguments: unknown }>;
 };
+
+export function replyDraftRefetchInterval(status: string | undefined): number {
+  return status === "generating" ? 750 : 4000;
+}
+
 export function ReplyReviewPanel({
   conversationId,
   disabled,
@@ -34,7 +39,7 @@ export function ReplyReviewPanel({
       apiClient.get<{ data: { drafts: Draft[] } }>(
         `/api/v1/conversations/${conversationId}/draft-reply`,
       ),
-    refetchInterval: 4000,
+    refetchInterval: (query) => replyDraftRefetchInterval(query.state.data?.data.drafts[0]?.status),
     retry: false,
   });
   const [feedback, setFeedback] = useState(""),
