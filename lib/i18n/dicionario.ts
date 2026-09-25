@@ -98,6 +98,14 @@ export const DICIONARIO: Traducoes = {
   },
   "Feedback para a próxima sugestão": { es: "Comentarios para la próxima sugerencia" },
   "Aprovar e enviar": { es: "Aprobar y enviar" },
+  "Usar no composer": { es: "Usar en el compositor" },
+  "Sugestão inserida no composer": { es: "Sugerencia insertada en el compositor" },
+  "A sugestão entra no composer para você editar e enviar manualmente.": {
+    es: "La sugerencia entra en el compositor para que la edites y la envíes manualmente.",
+  },
+  "O composer já contém texto. Revise, envie ou limpe-o antes de usar a sugestão.": {
+    es: "El compositor ya contiene texto. Revísalo, envíalo o bórralo antes de usar la sugerencia.",
+  },
   Rejeitar: { es: "Rechazar" },
   "Confira a configuração do agente e tente gerar novamente.": {
     es: "Revisa la configuración del agente e intenta generar de nuevo.",
